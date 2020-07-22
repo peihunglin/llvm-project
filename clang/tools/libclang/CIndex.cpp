@@ -2262,6 +2262,8 @@ void OMPClauseEnqueue::VisitOMPNogroupClause(const OMPNogroupClause *) {}
 
 void OMPClauseEnqueue::VisitOMPDestroyClause(const OMPDestroyClause *) {}
 
+void OMPClauseEnqueue::VisitOMPWhenClause(const OMPWhenClause *) {}
+
 void OMPClauseEnqueue::VisitOMPUnifiedAddressClause(
     const OMPUnifiedAddressClause *) {}
 

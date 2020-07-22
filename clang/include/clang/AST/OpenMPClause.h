@@ -7533,6 +7533,19 @@ public:
   }
 };
 
+
+/// This represents clause 'when' in the '#pragma omp metadirective' directive.
+///
+/// \code
+/// #pragma omp metadirective when()
+/// \endcode
+/// In this example directive '#pragma omp metadirective' has clause 'when'
+class OMPWhenClause : public OMPClause {
+public:
+  OMPWhenClause()
+    : OMPClause(llvm::omp::OMPC_when, SourceLocation(), SourceLocation()) {}
+};
+
 /// This class implements a simple visitor for OMPClause
 /// subclasses.
 template<class ImplClass, template <typename> class Ptr, typename RetTy>

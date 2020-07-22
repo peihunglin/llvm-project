@@ -2378,6 +2378,22 @@ void Sema::ActOnOpenMPEndDeclareVariant() {
   OMPDeclareVariantScopes.pop_back();
 }
 
+void Sema::ActOnOpenMPBeginMetadirective(SourceLocation Loc,
+                                          OMPTraitInfo &TI) {
+  if (!OMPMetadirectiveScopes.empty()) {
+    Diag(Loc, diag::warn_nested_declare_variant);
+    return;
+  }
+  OMPMetadirectiveScopes.push_back(OMPMetadirectiveScope(TI));
+}
+
+void Sema::ActOnOpenMPEndMetadirective() {
+  assert(isInOpenMPMetadirectiveScope() &&
+         "Not in OpenMP metadirective scope!");
+
+  OMPMetadirectiveScopes.pop_back();
+}
+
 void Sema::finalizeOpenMPDelayedAnalysis(const FunctionDecl *Caller,
                                          const FunctionDecl *Callee,
                                          SourceLocation Loc) {
@@ -4048,6 +4064,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_declare_variant:
   case OMPD_begin_declare_variant:
   case OMPD_end_declare_variant:
+  case OMPD_metadirective:
     llvm_unreachable("OpenMP Directive is not allowed");
   case OMPD_unknown:
     llvm_unreachable("Unknown OpenMP directive");
@@ -5322,6 +5339,11 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     if (LangOpts.OpenMP >= 50)
       AllowedNameModifiers.push_back(OMPD_simd);
     break;
+  case OMPD_metadirective:
+    assert(AStmt == nullptr && 
+	"No associated statement allowed for 'omp metadirective' directive");
+    Res = ActOnOpenMPMetadirectiveDirective(ClausesWithImplicit, StartLoc, EndLoc);
+    break;
   case OMPD_declare_target:
   case OMPD_end_declare_target:
   case OMPD_threadprivate:
@@ -5758,6 +5780,9 @@ static void setPrototype(Sema &S, FunctionDecl *FD, FunctionDecl *FDWithProto,
 }
 
 Sema::OMPDeclareVariantScope::OMPDeclareVariantScope(OMPTraitInfo &TI)
+    : TI(&TI), NameSuffix(TI.getMangledName()) {}
+
+Sema::OMPMetadirectiveScope::OMPMetadirectiveScope(OMPTraitInfo &TI)
     : TI(&TI), NameSuffix(TI.getMangledName()) {}
 
 FunctionDecl *
@@ -9399,6 +9424,13 @@ StmtResult Sema::ActOnOpenMPOrderedDirective(ArrayRef<OMPClause *> Clauses,
   }
 
   return OMPOrderedDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt);
+}
+
+StmtResult Sema::ActOnOpenMPMetadirectiveDirective(ArrayRef<OMPClause *> Clauses,
+                                          SourceLocation StartLoc,
+                                          SourceLocation EndLoc) {
+  assert(Clauses.size() < 1 && "Extra clauses in metadirective directive");
+  return OMPMetadirectiveDirective::Create(Context, StartLoc, EndLoc, Clauses);
 }
 
 namespace {

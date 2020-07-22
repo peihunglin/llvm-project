@@ -185,6 +185,7 @@ def OMPC_ThreadPrivate : Clause<"threadprivate"> {
   // threadprivate or thread local
   let isImplicit = 1;
 }
+def OMPC_When : Clause<"when"> {}
 def OMPC_Unknown : Clause<"unknown"> {
   let isImplicit = 1;
 }
@@ -493,4 +494,9 @@ def OMP_Scan : Directive<"scan"> {
 }
 def OMP_BeginDeclareVariant : Directive<"begin declare variant"> {}
 def OMP_EndDeclareVariant : Directive<"end declare variant"> {}
+def OMP_Metadirective : Directive<"metadirective"> {
+  let allowedClauses = [OMPC_Default, OMPC_When];
+}
+def OMP_BeginMetadirective : Directive<"begin metadirective"> {}
+def OMP_EndMetadirective : Directive<"end metadirective"> {}
 def OMP_Unknown : Directive<"unknown"> {}

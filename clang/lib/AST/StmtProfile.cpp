@@ -538,6 +538,8 @@ void OMPClauseProfiler::VisitOMPNogroupClause(const OMPNogroupClause *) {}
 
 void OMPClauseProfiler::VisitOMPDestroyClause(const OMPDestroyClause *) {}
 
+void OMPClauseProfiler::VisitOMPWhenClause(const OMPWhenClause *) {}
+
 template<typename T>
 void OMPClauseProfiler::VisitOMPClauseList(T *Node) {
   for (auto *E : Node->varlists()) {
@@ -1024,6 +1026,11 @@ void StmtProfiler::VisitOMPDistributeDirective(
     const OMPDistributeDirective *S) {
   VisitOMPLoopDirective(S);
 }
+
+void StmtProfiler::VisitOMPMetadirectiveDirective(const OMPMetadirectiveDirective *S) {
+  VisitOMPExecutableDirective(S);
+}
+
 
 void OMPClauseProfiler::VisitOMPDistScheduleClause(
     const OMPDistScheduleClause *C) {

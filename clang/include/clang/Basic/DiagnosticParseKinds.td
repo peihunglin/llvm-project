@@ -1436,4 +1436,7 @@ def warn_max_tokens_total : Warning<
 
 def note_max_tokens_total_override : Note<"total token limit set here">;
 
+def err_expected_begin_metadirective
+    : Error<"'#pragma omp end metadirective' with no matching '#pragma omp "
+            "begin metadirective'">;
 } // end of Parser diagnostics

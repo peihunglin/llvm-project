@@ -1716,6 +1716,10 @@ void OMPClausePrinter::VisitOMPDestroyClause(OMPDestroyClause *) {
   OS << "destroy";
 }
 
+void OMPClausePrinter::VisitOMPWhenClause(OMPWhenClause *) {
+  OS << "when";
+}
+
 template<typename T>
 void OMPClausePrinter::VisitOMPClauseList(T *Node, char StartSym) {
   for (typename T::varlist_iterator I = Node->varlist_begin(),

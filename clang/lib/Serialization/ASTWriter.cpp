@@ -6757,6 +6757,9 @@ void OMPClauseWriter::VisitOMPAffinityClause(OMPAffinityClause *C) {
     Record.AddStmt(E);
 }
 
+void OMPClauseWriter::VisitOMPWhenClause(OMPWhenClause *C) {
+}
+
 void ASTRecordWriter::writeOMPTraitInfo(const OMPTraitInfo *TI) {
   writeUInt32(TI->Sets.size());
   for (const auto &Set : TI->Sets) {

@@ -818,6 +818,7 @@ static bool hasNestedSPMDDirective(ASTContext &Ctx,
     case OMPD_parallel_master_taskloop:
     case OMPD_parallel_master_taskloop_simd:
     case OMPD_requires:
+    case OMPD_metadirective:
     case OMPD_unknown:
       llvm_unreachable("Unexpected directive.");
     }
@@ -898,6 +899,7 @@ static bool supportsSPMDExecutionMode(ASTContext &Ctx,
   case OMPD_parallel_master_taskloop:
   case OMPD_parallel_master_taskloop_simd:
   case OMPD_requires:
+  case OMPD_metadirective:
   case OMPD_unknown:
     break;
   }
@@ -1071,6 +1073,7 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
     case OMPD_parallel_master_taskloop:
     case OMPD_parallel_master_taskloop_simd:
     case OMPD_requires:
+    case OMPD_metadirective:
     case OMPD_unknown:
       llvm_unreachable("Unexpected directive.");
     }
@@ -1157,6 +1160,7 @@ static bool supportsLightweightRuntime(ASTContext &Ctx,
   case OMPD_parallel_master_taskloop:
   case OMPD_parallel_master_taskloop_simd:
   case OMPD_requires:
+  case OMPD_metadirective:
   case OMPD_unknown:
     break;
   }

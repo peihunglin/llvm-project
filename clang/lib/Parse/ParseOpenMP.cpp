@@ -106,6 +106,7 @@ static unsigned getOpenMPDirectiveKindEx(StringRef S) {
       .Case("mapper", OMPD_mapper)
       .Case("variant", OMPD_variant)
       .Case("begin", OMPD_begin)
+      .Case("metdirective", OMPD_metadirective)
       .Default(OMPD_unknown);
 }
 
@@ -167,7 +168,9 @@ static OpenMPDirectiveKindExWrapper parseOpenMPDirectiveKind(Parser &P) {
       {OMPD_parallel, OMPD_master, OMPD_parallel_master},
       {OMPD_parallel_master, OMPD_taskloop, OMPD_parallel_master_taskloop},
       {OMPD_parallel_master_taskloop, OMPD_simd,
-       OMPD_parallel_master_taskloop_simd}};
+       OMPD_parallel_master_taskloop_simd},
+      {OMPD_begin, OMPD_metadirective, OMPD_begin_metadirective},
+      {OMPD_end, OMPD_metadirective, OMPD_end_metadirective}};
   enum { CancellationPoint = 0, DeclareReduction = 1, TargetData = 2 };
   Token Tok = P.getCurToken();
   OpenMPDirectiveKindExWrapper DKind =
@@ -2006,6 +2009,9 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
   case OMPD_target_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for_simd:
   case OMPD_target_teams_distribute_simd:
+  case OMPD_metadirective:
+  case OMPD_begin_metadirective:
+  case OMPD_end_metadirective:
     Diag(Tok, diag::err_omp_unexpected_directive)
         << 1 << getOpenMPDirectiveName(DKind);
     break;
@@ -2053,7 +2059,8 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 ///         simd' | 'teams distribute parallel for simd' | 'teams distribute
 ///         parallel for' | 'target teams' | 'target teams distribute' | 'target
 ///         teams distribute parallel for' | 'target teams distribute parallel
-///         for simd' | 'target teams distribute simd' {clause}
+///         for simd' | 'target teams distribute simd' {clause} |
+///         'metadirective when' | 'metadirective default' |
 ///         annot_pragma_openmp_end
 ///
 StmtResult
@@ -2357,6 +2364,87 @@ Parser::ParseOpenMPDeclarativeOrExecutableDirective(ParsedStmtContext StmtCtx) {
         << 1 << getOpenMPDirectiveName(DKind);
     SkipUntil(tok::annot_pragma_openmp_end);
     break;
+  case OMPD_metadirective:{
+    llvm::errs() <<"metadirective is caught\n";
+    ConsumeToken();
+    while (Tok.isNot(tok::annot_pragma_openmp_end)) {
+      OpenMPClauseKind CKind = Tok.isAnnotation()
+              ? OMPC_unknown
+              : getOpenMPClauseKind(PP.getSpelling(Tok));
+      Actions.StartOpenMPClause(CKind);
+      OMPClause *Clause =
+          ParseOpenMPClause(OMPD_metadirective, CKind, !FirstClauses[unsigned(CKind)].getInt());
+      SkipUntil(tok::comma, tok::identifier, tok::annot_pragma_openmp_end,
+                StopBeforeMatch);
+      FirstClauses[unsigned(CKind)].setInt(true);
+      if (Clause != nullptr) {
+        FirstClauses[unsigned(CKind)].setPointer(Clause);
+        Clauses.push_back(Clause);
+      }
+      // Skip ',' if any.
+      if (Tok.is(tok::comma))
+        ConsumeToken();
+      Actions.EndOpenMPClause();
+    }
+    EndLoc = Tok.getLocation();  
+
+    Directive = Actions.ActOnOpenMPExecutableDirective(
+        DKind, DirName, CancelRegion, Clauses, nullptr, Loc,
+        EndLoc);
+    ConsumeAnnotationToken();
+
+    break;  
+  }
+  case OMPD_begin_metadirective: {
+    // The syntax is:
+    // { #pragma omp begin metadirective clause }
+    // <function-declaration-or-definition-sequence>
+    // { #pragma omp end metadirective }
+    //
+    llvm::errs() <<"begin metadirective is caught\n";
+    ConsumeToken();
+    OMPTraitInfo &TI = Actions.getASTContext().getNewOMPTraitInfo();
+
+    // Skip last tokens.
+    skipUntilPragmaOpenMPEnd(OMPD_begin_metadirective);
+
+    ParsingOpenMPDirectiveRAII NormalScope(*this, /*Value=*/false);
+
+    Actions.ActOnOpenMPBeginMetadirective(Loc, TI);
+
+    Directive = Actions.ActOnOpenMPExecutableDirective(
+        DKind, DirName, CancelRegion, Clauses, nullptr, Loc,
+        EndLoc);
+
+    unsigned Nesting = 1;
+    SourceLocation DKLoc;
+    OpenMPDirectiveKind DK = OMPD_unknown;
+    do {
+      DKLoc = Tok.getLocation();
+      DK = parseOpenMPDirectiveKind(*this);
+      if (DK == OMPD_end_metadirective)
+        --Nesting;
+      else if (DK == OMPD_begin_metadirective)
+        ++Nesting;
+      if (!Nesting || isEofOrEom())
+        break;
+      ConsumeAnyToken();
+    } while (true);
+
+    parseOMPEndDirective(OMPD_begin_metadirective, OMPD_end_metadirective,
+                         DK, Loc, DKLoc, /* SkipUntilOpenMPEnd */ true);
+    ConsumeAnnotationToken();
+    break;
+  }
+  case OMPD_end_metadirective: {
+    llvm::errs() <<"end metadirective is caught\n";
+    if (Actions.isInOpenMPMetadirectiveScope())
+      Actions.ActOnOpenMPEndMetadirective();
+    else
+      Diag(Loc, diag::err_expected_begin_metadirective);
+    ConsumeToken();
+    break;
+  }
   case OMPD_unknown:
     Diag(Tok, diag::err_omp_unknown_directive);
     SkipUntil(tok::annot_pragma_openmp_end);
@@ -2681,6 +2769,10 @@ OMPClause *Parser::ParseOpenMPClause(OpenMPDirectiveKind DKind,
           << getOpenMPClauseName(CKind) << getOpenMPDirectiveName(DKind);
     SkipUntil(tok::comma, tok::annot_pragma_openmp_end, StopBeforeMatch);
     break;
+  case OMPC_when:
+    llvm::errs() <<"WHEN clause is caught\n";
+    Clause = ParseOpenMPClause(CKind, WrongDirective);
+    break; 
   }
   return ErrorFound ? nullptr : Clause;
 }

@@ -658,6 +658,7 @@ void clang::getOpenMPCaptureRegions(
   case OMPD_atomic:
   case OMPD_target_data:
   case OMPD_distribute_simd:
+  case OMPD_metadirective:
     CaptureRegions.push_back(OMPD_unknown);
     break;
   case OMPD_threadprivate:
