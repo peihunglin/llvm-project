@@ -3668,6 +3668,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_parallel_for_simd:
   case OMPD_parallel_sections:
   case OMPD_parallel_master:
+  case OMPD_metadirective:
   case OMPD_teams:
   case OMPD_teams_distribute:
   case OMPD_teams_distribute_simd: {
@@ -4064,7 +4065,6 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_declare_variant:
   case OMPD_begin_declare_variant:
   case OMPD_end_declare_variant:
-  case OMPD_metadirective:
     llvm_unreachable("OpenMP Directive is not allowed");
   case OMPD_unknown:
     llvm_unreachable("Unknown OpenMP directive");
@@ -5340,9 +5340,12 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
       AllowedNameModifiers.push_back(OMPD_simd);
     break;
   case OMPD_metadirective:
-    assert(AStmt == nullptr && 
-	"No associated statement allowed for 'omp metadirective' directive");
-    Res = ActOnOpenMPMetadirectiveDirective(ClausesWithImplicit, StartLoc, EndLoc);
+    llvm::errs() <<"metadirective is caught\n";
+//    assert(AStmt == nullptr && 
+//	"No associated statement allowed for 'omp metadirective' directive");
+    Res = ActOnOpenMPMetadirectiveDirective(ClausesWithImplicit, AStmt, StartLoc, EndLoc);
+    if (LangOpts.OpenMP >= 50)
+      AllowedNameModifiers.push_back(OMPD_metadirective);
     break;
   case OMPD_declare_target:
   case OMPD_end_declare_target:
@@ -5459,6 +5462,7 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
       case OMPC_atomic_default_mem_order:
       case OMPC_device_type:
       case OMPC_match:
+      case OMPC_when:
         llvm_unreachable("Unexpected clause");
       }
       for (Stmt *CC : C->children()) {
@@ -9427,10 +9431,14 @@ StmtResult Sema::ActOnOpenMPOrderedDirective(ArrayRef<OMPClause *> Clauses,
 }
 
 StmtResult Sema::ActOnOpenMPMetadirectiveDirective(ArrayRef<OMPClause *> Clauses,
+                                          Stmt *AStmt,
                                           SourceLocation StartLoc,
                                           SourceLocation EndLoc) {
-  assert(Clauses.size() < 1 && "Extra clauses in metadirective directive");
-  return OMPMetadirectiveDirective::Create(Context, StartLoc, EndLoc, Clauses);
+  if (!AStmt)
+    return StmtError();
+
+  //assert(Clauses.size() < 1 && "Extra clauses in metadirective directive");
+  return OMPMetadirectiveDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt);
 }
 
 namespace {
@@ -13324,6 +13332,7 @@ OMPClause *Sema::ActOnOpenMPClause(OpenMPClauseKind Kind,
   case OMPC_destroy:
     Res = ActOnOpenMPDestroyClause(StartLoc, EndLoc);
     break;
+  case OMPC_when:
   case OMPC_if:
   case OMPC_final:
   case OMPC_num_threads:
@@ -13481,6 +13490,12 @@ OMPClause *Sema::ActOnOpenMPDynamicAllocatorsClause(SourceLocation StartLoc,
 OMPClause *Sema::ActOnOpenMPDestroyClause(SourceLocation StartLoc,
                                           SourceLocation EndLoc) {
   return new (Context) OMPDestroyClause(StartLoc, EndLoc);
+}
+
+OMPClause *Sema::ActOnOpenMPWhenClause(Expr *expr, OpenMPDirectiveKind dKind,
+                                       Stmt *dvariant, SourceLocation StartLoc,
+                                       SourceLocation LParenLoc, SourceLocation EndLoc) {
+  return new (Context) OMPWhenClause(expr, dKind, dvariant, StartLoc, LParenLoc, EndLoc);
 }
 
 OMPClause *Sema::ActOnOpenMPVarListClause(

@@ -2305,12 +2305,13 @@ OMPTargetTeamsDistributeSimdDirective::CreateEmpty(const ASTContext &C,
 OMPMetadirectiveDirective *OMPMetadirectiveDirective::Create(const ASTContext &C,
                                            SourceLocation StartLoc,
                                            SourceLocation EndLoc,
-                                           ArrayRef<OMPClause *> Clauses) {
+                                           ArrayRef<OMPClause *> Clauses,
+                                           Stmt *AssociatedStmt) {
   unsigned Size = llvm::alignTo(sizeof(OMPMetadirectiveDirective), alignof(OMPClause *));
-  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * Clauses.size(),
-                         alignof(OMPMetadirectiveDirective));
+  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * Clauses.size() + sizeof(Stmt *));
   auto *Dir = new (Mem) OMPMetadirectiveDirective(StartLoc, EndLoc, Clauses.size());
   Dir->setClauses(Clauses);
+  Dir->setAssociatedStmt(AssociatedStmt);
   return Dir;
 }
 
@@ -2318,8 +2319,7 @@ OMPMetadirectiveDirective *OMPMetadirectiveDirective::CreateEmpty(const ASTConte
                                                 unsigned NumClauses,
                                                 EmptyShell) {
   unsigned Size = llvm::alignTo(sizeof(OMPMetadirectiveDirective), alignof(OMPClause *));
-  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * NumClauses,
-                         alignof(OMPMetadirectiveDirective));
+  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * NumClauses + sizeof(Stmt));
   return new (Mem) OMPMetadirectiveDirective(NumClauses);
 }
 

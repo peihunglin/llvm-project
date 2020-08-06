@@ -156,6 +156,11 @@ enum OpenMPOrderClauseKind {
   OMPC_ORDER_unknown,
 };
 
+/// OpenMP attributes for 'when' clause.
+enum OpenMPWhenClauseKind {
+  OMPC_WHEN_unknown,
+};
+
 /// Scheduling data for loop-based OpenMP directives.
 struct OpenMPScheduleTy final {
   OpenMPScheduleClauseKind Schedule = OMPC_SCHEDULE_unknown;

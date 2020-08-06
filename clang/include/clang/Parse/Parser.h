@@ -3068,6 +3068,9 @@ private:
   /// Parses OpenMP context selectors.
   bool parseOMPContextSelectors(SourceLocation Loc, OMPTraitInfo &TI);
 
+  /// Parses OpenMP directive variant.
+  StmtResult parseOMPDirectiveVariant(Parser &p, ParsedStmtContext StmtCtx);
+
   /// Parse a `match` clause for an '#pragma omp declare variant'. Return true
   /// if there was an error.
   bool parseOMPDeclareVariantMatchClause(SourceLocation Loc, OMPTraitInfo &TI);
@@ -3196,6 +3199,14 @@ private:
   /// Expected format:
   /// '(' { <allocator> [ '(' <allocator_traits> ')' ] }+ ')'
   OMPClause *ParseOpenMPUsesAllocatorClause(OpenMPDirectiveKind DKind);
+  /// Parses metadirectiveclause of kind \a CKind for directive of a kind \a Kind.
+  ///
+  /// \param DKind Kind of current directive.
+  /// \param CKind Kind of current clause.
+  /// in current metadirective.
+  ///
+  OMPClause *ParseOpenMPMetadirectiveClause(OpenMPDirectiveKind DKind,
+                               OpenMPClauseKind CKind);
 
 public:
   /// Parses simple expression in parens for single-expression clauses of OpenMP

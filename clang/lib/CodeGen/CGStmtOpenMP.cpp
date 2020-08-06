@@ -6538,3 +6538,12 @@ void CodeGenFunction::EmitSimpleOMPExecutableDirective(
   // Check for outer lastprivate conditional update.
   checkForLastprivateConditionalUpdate(*this, D);
 }
+
+void CodeGenFunction::EmitOMPMetadirectiveDirective(const OMPMetadirectiveDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    CGF.EmitStmt(S.getInnermostCapturedStmt()->getCapturedStmt());
+  };
+  OMPLexicalScope Scope(*this, S, OMPD_unknown);
+  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_metadirective, CodeGen);
+}
+

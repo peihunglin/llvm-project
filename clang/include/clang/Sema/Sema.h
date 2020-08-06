@@ -10464,7 +10464,7 @@ public:
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc, VarsWithInheritedDSAType &VarsWithImplicitDSA);
   /// Called on well-formed '\#pragma omp metadirective'.
-  StmtResult ActOnOpenMPMetadirectiveDirective(ArrayRef<OMPClause *> Clauses, SourceLocation StartLoc, SourceLocation EndLoc);
+  StmtResult ActOnOpenMPMetadirectiveDirective(ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc, SourceLocation EndLoc);
 
   /// Checks correctness of linear modifiers.
   bool CheckOpenMPLinearModifier(OpenMPLinearClauseKind LinKind,
@@ -10849,6 +10849,11 @@ public:
                                           SourceLocation StartLoc,
                                           SourceLocation LParenLoc,
                                           SourceLocation EndLoc);
+
+  /// Called on well-formed 'when' clause.
+  OMPClause *ActOnOpenMPWhenClause(Expr *expr, OpenMPDirectiveKind dKind,
+                                       Stmt *dvariant, SourceLocation StartLoc,
+                                       SourceLocation LParenLoc, SourceLocation EndLoc);
 
   /// Data for list of allocators.
   struct UsesAllocatorsData {
