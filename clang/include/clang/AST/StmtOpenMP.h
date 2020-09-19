@@ -4902,6 +4902,9 @@ public:
 /// \endcode
 class OMPMetadirectiveDirective final : public OMPExecutableDirective {
   friend class ASTStmtReader;
+  friend class OMPExecutableDirective;
+  Stmt *IfStmt;
+
   /// Build directive with the given start and end location.
   ///
   /// \param StartLoc Starting location of the directive kind.
@@ -4944,6 +4947,8 @@ public:
   ///
   static OMPMetadirectiveDirective *CreateEmpty(const ASTContext &C, unsigned NumClauses,
                                        EmptyShell);
+  void setIfStmt(Stmt *stmt) { IfStmt = stmt; }
+  Stmt *getIfStmt() const { return IfStmt; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == OMPMetadirectiveDirectiveClass;

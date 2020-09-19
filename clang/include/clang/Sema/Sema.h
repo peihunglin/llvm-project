@@ -10464,7 +10464,9 @@ public:
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc, VarsWithInheritedDSAType &VarsWithImplicitDSA);
   /// Called on well-formed '\#pragma omp metadirective'.
-  StmtResult ActOnOpenMPMetadirectiveDirective(ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc, SourceLocation EndLoc);
+  StmtResult ActOnOpenMPMetadirectiveDirective(ArrayRef<OMPClause *> Clauses, 
+                                               Stmt *AStmt, SourceLocation StartLoc, 
+                                               SourceLocation EndLoc);
 
   /// Checks correctness of linear modifiers.
   bool CheckOpenMPLinearModifier(OpenMPLinearClauseKind LinKind,

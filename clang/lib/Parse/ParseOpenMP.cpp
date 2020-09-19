@@ -2793,6 +2793,7 @@ OMPClause *Parser::ParseOpenMPClause(OpenMPDirectiveKind DKind,
   case OMPC_threadprivate:
   case OMPC_uniform:
   case OMPC_match:
+  case OMPC_when:
     if (!WrongDirective)
       Diag(Tok, diag::err_omp_unexpected_clause)
           << getOpenMPClauseName(CKind) << getOpenMPDirectiveName(DKind);
@@ -4020,6 +4021,7 @@ switch (DKind) {
           CKind = OMPC_depobj;
         }
       }
+ 
       // No more implicit clauses allowed.
       ImplicitClauseAllowed = false;
       Actions.StartOpenMPClause(CKind);

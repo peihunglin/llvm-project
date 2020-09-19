@@ -538,7 +538,10 @@ void OMPClauseProfiler::VisitOMPNogroupClause(const OMPNogroupClause *) {}
 
 void OMPClauseProfiler::VisitOMPDestroyClause(const OMPDestroyClause *) {}
 
-void OMPClauseProfiler::VisitOMPWhenClause(const OMPWhenClause *) {}
+void OMPClauseProfiler::VisitOMPWhenClause(const OMPWhenClause *C) {
+  if (C->getExpr())
+    Profiler->VisitStmt(C->getExpr());
+}
 
 template<typename T>
 void OMPClauseProfiler::VisitOMPClauseList(T *Node) {

@@ -7560,9 +7560,6 @@ class OMPWhenClause final : public OMPClause {
 
   void setExpr(Expr *E) { CondExpr = E; }
 
-  /// Returns the directive variant kind
-  OpenMPDirectiveKind getDKind() { return DKind; }
-
 public:
   OMPWhenClause(Expr *expr, OpenMPDirectiveKind dKind,
                 Stmt *dvariant, SourceLocation StartLoc,
@@ -7608,6 +7605,10 @@ public:
   static bool classof(const OMPClause *T) {
     return T->getClauseKind() == llvm::omp::OMPC_when;
   }
+
+  /// Returns the directive variant kind
+  OpenMPDirectiveKind getDKind() { return DKind; }
+
 };
 
 /// This class implements a simple visitor for OMPClause
