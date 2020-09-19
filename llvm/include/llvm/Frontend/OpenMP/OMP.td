@@ -1464,11 +1464,13 @@ def OMP_Scan : Directive<"scan"> {
 def OMP_BeginDeclareVariant : Directive<"begin declare variant"> {}
 def OMP_EndDeclareVariant : Directive<"end declare variant"> {}
 def OMP_Metadirective : Directive<"metadirective"> {
-  let allowedClauses = [OMPC_Default, OMPC_When];
+  let allowedClauses = [
+    VersionedClause<OMPC_Default>, 
+    VersionedClause<OMPC_When>
+];
 }
 def OMP_BeginMetadirective : Directive<"begin metadirective"> {}
 def OMP_EndMetadirective : Directive<"end metadirective"> {}
-def OMP_Unknown : Directive<"unknown"> {}
 def OMP_ParallelWorkshare : Directive<"parallel workshare"> {
   let allowedClauses = [
     VersionedClause<OMPC_Allocate>,
