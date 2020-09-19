@@ -2386,6 +2386,7 @@
 // CHECK_AMDFAM10_M32: #define __SSE4A__ 1
 // CHECK_AMDFAM10_M32: #define __SSE_MATH__ 1
 // CHECK_AMDFAM10_M32: #define __SSE__ 1
+// CHECK_AMDFAM10_M32-NOT: #define __SSSE3__ 1
 // CHECK_AMDFAM10_M32: #define __amdfam10 1
 // CHECK_AMDFAM10_M32: #define __amdfam10__ 1
 // CHECK_AMDFAM10_M32: #define __i386 1
@@ -2408,6 +2409,7 @@
 // CHECK_AMDFAM10_M64: #define __SSE4A__ 1
 // CHECK_AMDFAM10_M64: #define __SSE_MATH__ 1
 // CHECK_AMDFAM10_M64: #define __SSE__ 1
+// CHECK_AMDFAM10_M64-NOT: #define __SSSE3__ 1
 // CHECK_AMDFAM10_M64: #define __amd64 1
 // CHECK_AMDFAM10_M64: #define __amd64__ 1
 // CHECK_AMDFAM10_M64: #define __amdfam10 1
@@ -2753,9 +2755,11 @@
 // CHECK_BDVER4_M32: #define __LWP__ 1
 // CHECK_BDVER4_M32: #define __LZCNT__ 1
 // CHECK_BDVER4_M32: #define __MMX__ 1
+// CHECK_BDVER4_M32: #define __MOVBE__ 1
 // CHECK_BDVER4_M32: #define __PCLMUL__ 1
 // CHECK_BDVER4_M32: #define __POPCNT__ 1
 // CHECK_BDVER4_M32: #define __PRFCHW__ 1
+// CHECK_BDVER4_M32: #define __RDRND__ 1
 // CHECK_BDVER4_M32: #define __SSE2_MATH__ 1
 // CHECK_BDVER4_M32: #define __SSE2__ 1
 // CHECK_BDVER4_M32: #define __SSE3__ 1
@@ -2791,9 +2795,11 @@
 // CHECK_BDVER4_M64: #define __LWP__ 1
 // CHECK_BDVER4_M64: #define __LZCNT__ 1
 // CHECK_BDVER4_M64: #define __MMX__ 1
+// CHECK_BDVER4_M64: #define __MOVBE__ 1
 // CHECK_BDVER4_M64: #define __PCLMUL__ 1
 // CHECK_BDVER4_M64: #define __POPCNT__ 1
 // CHECK_BDVER4_M64: #define __PRFCHW__ 1
+// CHECK_BDVER4_M64: #define __RDRND__ 1
 // CHECK_BDVER4_M64: #define __SSE2_MATH__ 1
 // CHECK_BDVER4_M64: #define __SSE2__ 1
 // CHECK_BDVER4_M64: #define __SSE3__ 1
@@ -2828,6 +2834,7 @@
 // CHECK_ZNVER1_M32: #define __CLFLUSHOPT__ 1
 // CHECK_ZNVER1_M32: #define __CLZERO__ 1
 // CHECK_ZNVER1_M32: #define __F16C__ 1
+// CHECK_ZNVER1_M32-NOT: #define __FMA4__ 1
 // CHECK_ZNVER1_M32: #define __FMA__ 1
 // CHECK_ZNVER1_M32: #define __FSGSBASE__ 1
 // CHECK_ZNVER1_M32: #define __LZCNT__ 1
@@ -2848,6 +2855,8 @@
 // CHECK_ZNVER1_M32: #define __SSE_MATH__ 1
 // CHECK_ZNVER1_M32: #define __SSE__ 1
 // CHECK_ZNVER1_M32: #define __SSSE3__ 1
+// CHECK_ZNVER1_M32-NOT: #define __TBM__ 1
+// CHECK_ZNVER1_M32-NOT: #define __XOP__ 1
 // CHECK_ZNVER1_M32: #define __XSAVEC__ 1
 // CHECK_ZNVER1_M32: #define __XSAVEOPT__ 1
 // CHECK_ZNVER1_M32: #define __XSAVES__ 1
@@ -2872,6 +2881,7 @@
 // CHECK_ZNVER1_M64: #define __CLFLUSHOPT__ 1
 // CHECK_ZNVER1_M64: #define __CLZERO__ 1
 // CHECK_ZNVER1_M64: #define __F16C__ 1
+// CHECK_ZNVER1_M64-NOT: #define __FMA4__ 1
 // CHECK_ZNVER1_M64: #define __FMA__ 1
 // CHECK_ZNVER1_M64: #define __FSGSBASE__ 1
 // CHECK_ZNVER1_M64: #define __LZCNT__ 1
@@ -2892,6 +2902,8 @@
 // CHECK_ZNVER1_M64: #define __SSE_MATH__ 1
 // CHECK_ZNVER1_M64: #define __SSE__ 1
 // CHECK_ZNVER1_M64: #define __SSSE3__ 1
+// CHECK_ZNVER1_M64-NOT: #define __TBM__ 1
+// CHECK_ZNVER1_M64-NOT: #define __XOP__ 1
 // CHECK_ZNVER1_M64: #define __XSAVEC__ 1
 // CHECK_ZNVER1_M64: #define __XSAVEOPT__ 1
 // CHECK_ZNVER1_M64: #define __XSAVES__ 1
@@ -2919,6 +2931,7 @@
 // CHECK_ZNVER2_M32: #define __CLWB__ 1
 // CHECK_ZNVER2_M32: #define __CLZERO__ 1
 // CHECK_ZNVER2_M32: #define __F16C__ 1
+// CHECK_ZNVER2_M32-NOT: #define __FMA4__ 1
 // CHECK_ZNVER2_M32: #define __FMA__ 1
 // CHECK_ZNVER2_M32: #define __FSGSBASE__ 1
 // CHECK_ZNVER2_M32: #define __LZCNT__ 1
@@ -2939,7 +2952,9 @@
 // CHECK_ZNVER2_M32: #define __SSE_MATH__ 1
 // CHECK_ZNVER2_M32: #define __SSE__ 1
 // CHECK_ZNVER2_M32: #define __SSSE3__ 1
+// CHECK_ZNVER2_M32-NOT: #define __TBM__ 1
 // CHECK_ZNVER2_M32: #define __WBNOINVD__ 1
+// CHECK_ZNVER2_M32-NOT: #define __XOP__ 1
 // CHECK_ZNVER2_M32: #define __XSAVEC__ 1
 // CHECK_ZNVER2_M32: #define __XSAVEOPT__ 1
 // CHECK_ZNVER2_M32: #define __XSAVES__ 1
@@ -2965,6 +2980,7 @@
 // CHECK_ZNVER2_M64: #define __CLWB__ 1
 // CHECK_ZNVER2_M64: #define __CLZERO__ 1
 // CHECK_ZNVER2_M64: #define __F16C__ 1
+// CHECK_ZNVER2_M64-NOT: #define __FMA4__ 1
 // CHECK_ZNVER2_M64: #define __FMA__ 1
 // CHECK_ZNVER2_M64: #define __FSGSBASE__ 1
 // CHECK_ZNVER2_M64: #define __LZCNT__ 1
@@ -2985,7 +3001,9 @@
 // CHECK_ZNVER2_M64: #define __SSE_MATH__ 1
 // CHECK_ZNVER2_M64: #define __SSE__ 1
 // CHECK_ZNVER2_M64: #define __SSSE3__ 1
+// CHECK_ZNVER2_M64-NOT: #define __TBM__ 1
 // CHECK_ZNVER2_M64: #define __WBNOINVD__ 1
+// CHECK_ZNVER2_M64-NOT: #define __XOP__ 1
 // CHECK_ZNVER2_M64: #define __XSAVEC__ 1
 // CHECK_ZNVER2_M64: #define __XSAVEOPT__ 1
 // CHECK_ZNVER2_M64: #define __XSAVES__ 1
@@ -3157,6 +3175,14 @@
 // CHECK_SPARCV9: #define __sparc_v9__ 1
 // CHECK_SPARCV9: #define __sparcv9 1
 // CHECK_SPARCV9: #define __sparcv9__ 1
+
+// RUN: %clang -E -dM %s -o - 2>&1 \
+// RUN:     -target sparcv9-unknown-linux \
+// RUN:   | FileCheck -match-full-lines %s -check-prefix=CHECK_SPARCV9_GCC_ATOMICS
+// CHECK_SPARCV9_GCC_ATOMICS: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_1 1
+// CHECK_SPARCV9_GCC_ATOMICS: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_2 1
+// CHECK_SPARCV9_GCC_ATOMICS: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4 1
+// CHECK_SPARCV9_GCC_ATOMICS: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8 1
 
 // Begin SystemZ/GCC/Linux tests ----------------
 

@@ -101,21 +101,21 @@ public:
   CVMCAdapter(MCStreamer &OS, TypeCollection &TypeTable)
       : OS(&OS), TypeTable(TypeTable) {}
 
-  void emitBytes(StringRef Data) { OS->emitBytes(Data); }
+  void emitBytes(StringRef Data) override { OS->emitBytes(Data); }
 
-  void emitIntValue(uint64_t Value, unsigned Size) {
+  void emitIntValue(uint64_t Value, unsigned Size) override {
     OS->emitIntValueInHex(Value, Size);
   }
 
-  void emitBinaryData(StringRef Data) { OS->emitBinaryData(Data); }
+  void emitBinaryData(StringRef Data) override { OS->emitBinaryData(Data); }
 
-  void AddComment(const Twine &T) { OS->AddComment(T); }
+  void AddComment(const Twine &T) override { OS->AddComment(T); }
 
-  void AddRawComment(const Twine &T) { OS->emitRawComment(T); }
+  void AddRawComment(const Twine &T) override { OS->emitRawComment(T); }
 
-  bool isVerboseAsm() { return OS->isVerboseAsm(); }
+  bool isVerboseAsm() override { return OS->isVerboseAsm(); }
 
-  std::string getTypeName(TypeIndex TI) {
+  std::string getTypeName(TypeIndex TI) override {
     std::string TypeName;
     if (!TI.isNoneType()) {
       if (TI.isSimple())
@@ -1592,11 +1592,16 @@ TypeIndex CodeViewDebug::lowerTypeArray(const DICompositeType *Ty) {
     assert(Element->getTag() == dwarf::DW_TAG_subrange_type);
 
     const DISubrange *Subrange = cast<DISubrange>(Element);
-    assert(!Subrange->getRawLowerBound() &&
-           "codeview doesn't support subranges with lower bounds");
     int64_t Count = -1;
-    if (auto *CI = Subrange->getCount().dyn_cast<ConstantInt*>())
-      Count = CI->getSExtValue();
+    // Calculate the count if either LowerBound is absent or is zero and
+    // either of Count or UpperBound are constant.
+    auto *LI = Subrange->getLowerBound().dyn_cast<ConstantInt *>();
+    if (!Subrange->getRawLowerBound() || (LI && (LI->getSExtValue() == 0))) {
+      if (auto *CI = Subrange->getCount().dyn_cast<ConstantInt*>())
+        Count = CI->getSExtValue();
+      else if (auto *UI = Subrange->getUpperBound().dyn_cast<ConstantInt*>())
+        Count = UI->getSExtValue() + 1; // LowerBound is zero
+    }
 
     // Forward declarations of arrays without a size and VLAs use a count of -1.
     // Emit a count of zero in these cases to match what MSVC does for arrays

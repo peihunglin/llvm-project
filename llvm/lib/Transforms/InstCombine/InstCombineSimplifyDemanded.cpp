@@ -1030,12 +1030,6 @@ Value *InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
                                                            APInt DemandedElts,
                                                            int DMaskIdx) {
 
-  // FIXME: Allow v3i16/v3f16 in buffer intrinsics when the types are fully supported.
-  if (DMaskIdx < 0 &&
-      II->getType()->getScalarSizeInBits() != 32 &&
-      DemandedElts.getActiveBits() == 3)
-    return nullptr;
-
   auto *IIVTy = cast<VectorType>(II->getType());
   unsigned VWidth = IIVTy->getNumElements();
   if (VWidth == 1)
@@ -1124,23 +1118,22 @@ Value *InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
   if (!NewNumElts)
     return UndefValue::get(II->getType());
 
+  // FIXME: Allow v3i16/v3f16 in buffer and image intrinsics when the types are
+  // fully supported.
+  if (II->getType()->getScalarSizeInBits() == 16 && NewNumElts == 3)
+    return nullptr;
+
   if (NewNumElts >= VWidth && DemandedElts.isMask()) {
     if (DMaskIdx >= 0)
       II->setArgOperand(DMaskIdx, Args[DMaskIdx]);
     return nullptr;
   }
 
-  // Determine the overload types of the original intrinsic.
-  auto IID = II->getIntrinsicID();
-  SmallVector<Intrinsic::IITDescriptor, 16> Table;
-  getIntrinsicInfoTableEntries(IID, Table);
-  ArrayRef<Intrinsic::IITDescriptor> TableRef = Table;
-
   // Validate function argument and return types, extracting overloaded types
   // along the way.
-  FunctionType *FTy = II->getCalledFunction()->getFunctionType();
   SmallVector<Type *, 6> OverloadTys;
-  Intrinsic::matchIntrinsicSignature(FTy, TableRef, OverloadTys);
+  if (!Intrinsic::getIntrinsicSignature(II->getCalledFunction(), OverloadTys))
+    return nullptr;
 
   Module *M = II->getParent()->getParent()->getParent();
   Type *EltTy = IIVTy->getElementType();
@@ -1148,7 +1141,8 @@ Value *InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
       (NewNumElts == 1) ? EltTy : FixedVectorType::get(EltTy, NewNumElts);
 
   OverloadTys[0] = NewTy;
-  Function *NewIntrin = Intrinsic::getDeclaration(M, IID, OverloadTys);
+  Function *NewIntrin =
+      Intrinsic::getDeclaration(M, II->getIntrinsicID(), OverloadTys);
 
   CallInst *NewCall = Builder.CreateCall(NewIntrin, Args);
   NewCall->takeName(II);

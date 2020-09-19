@@ -25,7 +25,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR LIBCXXABI_STANDALONE_B
   project(libcxxabi CXX C)
 
   set(PACKAGE_NAME libcxxabi)
-  set(PACKAGE_VERSION 11.0.0git)
+  set(PACKAGE_VERSION 11.0.0)
   set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
   set(PACKAGE_BUGREPORT "llvm-bugs@lists.llvm.org")
 
@@ -137,6 +137,8 @@ option(LIBCXXABI_HERMETIC_STATIC_LIBRARY
 
 set(LIBCXXABI_TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/test/lit.site.cfg.in" CACHE STRING
     "The Lit testing configuration to use when running the tests.")
+set(LIBCXXABI_TEST_PARAMS "" CACHE STRING
+    "A list of parameters to run the Lit test suite with.")
 
 #===============================================================================
 # Configure System
@@ -307,7 +309,6 @@ if (LIBCXXABI_ENABLE_EXCEPTIONS)
   # Do we really need to be run through the C compiler ?
   add_c_compile_flags_if_supported(-funwind-tables)
 else()
-  add_definitions(-D_LIBCXXABI_NO_EXCEPTIONS)
   add_compile_flags_if_supported(-fno-exceptions)
   add_compile_flags_if_supported(-EHs-)
   add_compile_flags_if_supported(-EHa-)

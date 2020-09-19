@@ -56,6 +56,13 @@ static bool isLambdaParameterList(const FormatToken *Left) {
          Left->Previous->MatchingParen->is(TT_LambdaLSquare);
 }
 
+/// Returns \c true if the token is followed by a boolean condition, \c false
+/// otherwise.
+static bool isKeywordWithCondition(const FormatToken &Tok) {
+  return Tok.isOneOf(tok::kw_if, tok::kw_for, tok::kw_while, tok::kw_switch,
+                     tok::kw_constexpr, tok::kw_catch);
+}
+
 /// A parser that gathers additional information about tokens.
 ///
 /// The \c TokenAnnotator tries to match parenthesis and square brakets and
@@ -108,6 +115,12 @@ private:
 
     while (CurrentToken) {
       if (CurrentToken->is(tok::greater)) {
+        // Try to do a better job at looking for ">>" within the condition of
+        // a statement.
+        if (CurrentToken->Next && CurrentToken->Next->is(tok::greater) &&
+            Left->ParentBracket != tok::less &&
+            isKeywordWithCondition(*Line.First))
+          return false;
         Left->MatchingParen = CurrentToken;
         CurrentToken->MatchingParen = Left;
         // In TT_Proto, we must distignuish between:
@@ -160,6 +173,27 @@ private:
     return false;
   }
 
+  bool parseUntouchableParens() {
+    while (CurrentToken) {
+      CurrentToken->Finalized = true;
+      switch (CurrentToken->Tok.getKind()) {
+      case tok::l_paren:
+        next();
+        if (!parseUntouchableParens())
+          return false;
+        continue;
+      case tok::r_paren:
+        next();
+        return true;
+      default:
+        // no-op
+        break;
+      }
+      next();
+    }
+    return false;
+  }
+
   bool parseParens(bool LookForDecls = false) {
     if (!CurrentToken)
       return false;
@@ -170,6 +204,11 @@ private:
     // FIXME: This is a bit of a hack. Do better.
     Contexts.back().ColonIsForRangeExpr =
         Contexts.size() == 2 && Contexts[0].ColonIsForRangeExpr;
+
+    if (Left->Previous && Left->Previous->is(TT_UntouchableMacroFunc)) {
+      Left->Finalized = true;
+      return parseUntouchableParens();
+    }
 
     bool StartsObjCMethodExpr = false;
     if (FormatToken *MaybeSel = Left->Previous) {
@@ -1311,7 +1350,7 @@ private:
             TT_TypenameMacro, TT_FunctionLBrace, TT_ImplicitStringLiteral,
             TT_InlineASMBrace, TT_JsFatArrow, TT_LambdaArrow, TT_NamespaceMacro,
             TT_OverloadedOperator, TT_RegexLiteral, TT_TemplateString,
-            TT_ObjCStringLiteral))
+            TT_ObjCStringLiteral, TT_UntouchableMacroFunc))
       CurrentToken->setType(TT_Unknown);
     CurrentToken->Role.reset();
     CurrentToken->MatchingParen = nullptr;
@@ -2707,13 +2746,6 @@ bool TokenAnnotator::spaceRequiredBeforeParens(const FormatToken &Right) const {
           Right.ParameterCount > 0);
 }
 
-/// Returns \c true if the token is followed by a boolean condition, \c false
-/// otherwise.
-static bool isKeywordWithCondition(const FormatToken &Tok) {
-  return Tok.isOneOf(tok::kw_if, tok::kw_for, tok::kw_while, tok::kw_switch,
-                     tok::kw_constexpr, tok::kw_catch);
-}
-
 bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
                                           const FormatToken &Left,
                                           const FormatToken &Right) {
@@ -2818,6 +2850,11 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
             Left.Previous &&
             !Left.Previous->isOneOf(tok::l_paren, tok::coloncolon,
                                     tok::l_square));
+  // Ensure right pointer alignement with ellipsis e.g. int *...P
+  if (Left.is(tok::ellipsis) && Left.Previous &&
+      Left.Previous->isOneOf(tok::star, tok::amp, tok::ampamp))
+    return Style.PointerAlignment != FormatStyle::PAS_Right;
+
   if (Right.is(tok::star) && Left.is(tok::l_paren))
     return false;
   if (Left.is(tok::star) && Right.isOneOf(tok::star, tok::amp, tok::ampamp))
@@ -3970,7 +4007,7 @@ void TokenAnnotator::printDebugInfo(const AnnotatedLine &Line) {
                  << " C=" << Tok->CanBreakBefore
                  << " T=" << getTokenTypeName(Tok->getType())
                  << " S=" << Tok->SpacesRequiredBefore
-                 << " B=" << Tok->BlockParameterCount
+                 << " F=" << Tok->Finalized << " B=" << Tok->BlockParameterCount
                  << " BK=" << Tok->BlockKind << " P=" << Tok->SplitPenalty
                  << " Name=" << Tok->Tok.getName() << " L=" << Tok->TotalLength
                  << " PPK=" << Tok->PackingKind << " FakeLParens=";

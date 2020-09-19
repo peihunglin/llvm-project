@@ -53,9 +53,10 @@ static const Expr *checkMapClauseExpressionBase(
 namespace {
 /// Default data sharing attributes, which can be applied to directive.
 enum DefaultDataSharingAttributes {
-  DSA_unspecified = 0, /// Data sharing attribute not specified.
-  DSA_none = 1 << 0,   /// Default data sharing attribute 'none'.
-  DSA_shared = 1 << 1, /// Default data sharing attribute 'shared'.
+  DSA_unspecified = 0,       /// Data sharing attribute not specified.
+  DSA_none = 1 << 0,         /// Default data sharing attribute 'none'.
+  DSA_shared = 1 << 1,       /// Default data sharing attribute 'shared'.
+  DSA_firstprivate = 1 << 2, /// Default data sharing attribute 'firstprivate'.
 };
 
 /// Stack for tracking declarations used in OpenMP directives and
@@ -684,6 +685,11 @@ public:
     getTopOfStack().DefaultAttr = DSA_shared;
     getTopOfStack().DefaultAttrLoc = Loc;
   }
+  /// Set default data sharing attribute to firstprivate.
+  void setDefaultDSAFirstPrivate(SourceLocation Loc) {
+    getTopOfStack().DefaultAttr = DSA_firstprivate;
+    getTopOfStack().DefaultAttrLoc = Loc;
+  }
   /// Set default data mapping attribute to Modifier:Kind
   void setDefaultDMAAttr(OpenMPDefaultmapClauseModifier M,
                          OpenMPDefaultmapClauseKind Kind,
@@ -1182,6 +1188,15 @@ DSAStackTy::DSAVarData DSAStackTy::getDSA(const_iterator &Iter,
     DVar.ImplicitDSALoc = Iter->DefaultAttrLoc;
     return DVar;
   case DSA_none:
+    return DVar;
+  case DSA_firstprivate:
+    if (VD->getStorageDuration() == SD_Static &&
+        VD->getDeclContext()->isFileContext()) {
+      DVar.CKind = OMPC_unknown;
+    } else {
+      DVar.CKind = OMPC_firstprivate;
+    }
+    DVar.ImplicitDSALoc = Iter->DefaultAttrLoc;
     return DVar;
   case DSA_unspecified:
     // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
@@ -2058,7 +2073,13 @@ bool Sema::isOpenMPCapturedByRef(const ValueDecl *D, unsigned Level,
         // If the variable is artificial and must be captured by value - try to
         // capture by value.
         !(isa<OMPCapturedExprDecl>(D) && !D->hasAttr<OMPCaptureNoInitAttr>() &&
-          !cast<OMPCapturedExprDecl>(D)->getInit()->isGLValue());
+          !cast<OMPCapturedExprDecl>(D)->getInit()->isGLValue()) &&
+        // If the variable is implicitly firstprivate and scalar - capture by
+        // copy
+        !(DSAStack->getDefaultDSA() == DSA_firstprivate &&
+          !DSAStack->hasExplicitDSA(
+              D, [](OpenMPClauseKind K) { return K != OMPC_unknown; }, Level) &&
+          !DSAStack->isLoopControlVariable(D, Level).first);
   }
 
   // When passing data by copy, we need to make sure it fits the uintptr size
@@ -2185,10 +2206,13 @@ VarDecl *Sema::isOpenMPCapturedDecl(ValueDecl *D, bool CheckScopeInfo,
         DSAStack->isClauseParsingMode());
     // Global shared must not be captured.
     if (VD && !VD->hasLocalStorage() && DVarPrivate.CKind == OMPC_unknown &&
-        (DSAStack->getDefaultDSA() != DSA_none || DVarTop.CKind == OMPC_shared))
+        ((DSAStack->getDefaultDSA() != DSA_none &&
+          DSAStack->getDefaultDSA() != DSA_firstprivate) ||
+         DVarTop.CKind == OMPC_shared))
       return nullptr;
     if (DVarPrivate.CKind != OMPC_unknown ||
-        (VD && DSAStack->getDefaultDSA() == DSA_none))
+        (VD && (DSAStack->getDefaultDSA() == DSA_none ||
+                DSAStack->getDefaultDSA() == DSA_firstprivate)))
       return VD ? VD : cast<VarDecl>(DVarPrivate.PrivateCopy->getDecl());
   }
   return nullptr;
@@ -2220,7 +2244,11 @@ OpenMPClauseKind Sema::isOpenMPPrivateDecl(ValueDecl *D, unsigned Level,
           [](OpenMPDirectiveKind K) { return isOpenMPTaskingDirective(K); },
           Level)) {
     bool IsTriviallyCopyable =
-        D->getType().getNonReferenceType().isTriviallyCopyableType(Context);
+        D->getType().getNonReferenceType().isTriviallyCopyableType(Context) &&
+        !D->getType()
+             .getNonReferenceType()
+             .getCanonicalType()
+             ->getAsCXXRecordDecl();
     OpenMPDirectiveKind DKind = DSAStack->getDirective(Level);
     SmallVector<OpenMPDirectiveKind, 4> CaptureRegions;
     getOpenMPCaptureRegions(CaptureRegions, DKind);
@@ -3349,10 +3377,19 @@ public:
       // in the construct, and does not have a predetermined data-sharing
       // attribute, must have its data-sharing attribute explicitly determined
       // by being listed in a data-sharing attribute clause.
-      if (DVar.CKind == OMPC_unknown && Stack->getDefaultDSA() == DSA_none &&
+      if (DVar.CKind == OMPC_unknown &&
+          (Stack->getDefaultDSA() == DSA_none ||
+           Stack->getDefaultDSA() == DSA_firstprivate) &&
           isImplicitOrExplicitTaskingRegion(DKind) &&
           VarsWithInheritedDSA.count(VD) == 0) {
-        VarsWithInheritedDSA[VD] = E;
+        bool InheritedDSA = Stack->getDefaultDSA() == DSA_none;
+        if (!InheritedDSA && Stack->getDefaultDSA() == DSA_firstprivate) {
+          DSAStackTy::DSAVarData DVar =
+              Stack->getImplicitDSA(VD, /*FromParent=*/false);
+          InheritedDSA = DVar.CKind == OMPC_unknown;
+        }
+        if (InheritedDSA)
+          VarsWithInheritedDSA[VD] = E;
         return;
       }
 
@@ -3454,7 +3491,9 @@ public:
 
       // Define implicit data-sharing attributes for task.
       DVar = Stack->getImplicitDSA(VD, /*FromParent=*/false);
-      if (isOpenMPTaskingDirective(DKind) && DVar.CKind != OMPC_shared &&
+      if (((isOpenMPTaskingDirective(DKind) && DVar.CKind != OMPC_shared) ||
+           (Stack->getDefaultDSA() == DSA_firstprivate &&
+            DVar.CKind == OMPC_firstprivate && !DVar.RefExpr)) &&
           !Stack->isLoopControlVariable(VD).first) {
         ImplicitFirstprivate.push_back(E);
         return;
@@ -4067,6 +4106,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_end_declare_variant:
     llvm_unreachable("OpenMP Directive is not allowed");
   case OMPD_unknown:
+  default:
     llvm_unreachable("Unknown OpenMP directive");
   }
 }
@@ -5360,13 +5400,16 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
   case OMPD_end_declare_variant:
     llvm_unreachable("OpenMP Directive is not allowed");
   case OMPD_unknown:
+  default:
     llvm_unreachable("Unknown OpenMP directive");
   }
 
   ErrorFound = Res.isInvalid() || ErrorFound;
 
-  // Check variables in the clauses if default(none) was specified.
-  if (DSAStack->getDefaultDSA() == DSA_none) {
+  // Check variables in the clauses if default(none) or
+  // default(firstprivate) was specified.
+  if (DSAStack->getDefaultDSA() == DSA_none ||
+      DSAStack->getDefaultDSA() == DSA_firstprivate) {
     DSAAttrChecker DSAChecker(DSAStack, *this, nullptr);
     for (OMPClause *C : Clauses) {
       switch (C->getClauseKind()) {
@@ -5463,6 +5506,7 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
       case OMPC_device_type:
       case OMPC_match:
       case OMPC_when:
+      default:
         llvm_unreachable("Unexpected clause");
       }
       for (Stmt *CC : C->children()) {
@@ -5477,7 +5521,8 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     if (P.getFirst()->isImplicit() || isa<OMPCapturedExprDecl>(P.getFirst()))
       continue;
     ErrorFound = true;
-    if (DSAStack->getDefaultDSA() == DSA_none) {
+    if (DSAStack->getDefaultDSA() == DSA_none ||
+        DSAStack->getDefaultDSA() == DSA_firstprivate) {
       Diag(P.second->getExprLoc(), diag::err_omp_no_dsa_for_variable)
           << P.first << P.second->getSourceRange();
       Diag(DSAStack->getDefaultDSALocation(), diag::note_omp_default_dsa_none);
@@ -11723,6 +11768,7 @@ OMPClause *Sema::ActOnOpenMPSingleExprClause(OpenMPClauseKind Kind, Expr *Expr,
   case OMPC_exclusive:
   case OMPC_uses_allocators:
   case OMPC_affinity:
+  default:
     llvm_unreachable("Clause is not allowed.");
   }
   return Res;
@@ -11877,6 +11923,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_requires:
       llvm_unreachable("Unexpected OpenMP directive with if-clause");
     case OMPD_unknown:
+    default:
       llvm_unreachable("Unknown OpenMP directive");
     }
     break;
@@ -11955,6 +12002,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_requires:
       llvm_unreachable("Unexpected OpenMP directive with num_threads-clause");
     case OMPD_unknown:
+    default:
       llvm_unreachable("Unknown OpenMP directive");
     }
     break;
@@ -12031,6 +12079,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_requires:
       llvm_unreachable("Unexpected OpenMP directive with num_teams-clause");
     case OMPD_unknown:
+    default:
       llvm_unreachable("Unknown OpenMP directive");
     }
     break;
@@ -12107,6 +12156,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_requires:
       llvm_unreachable("Unexpected OpenMP directive with thread_limit-clause");
     case OMPD_unknown:
+    default:
       llvm_unreachable("Unknown OpenMP directive");
     }
     break;
@@ -12183,6 +12233,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_requires:
       llvm_unreachable("Unexpected OpenMP directive with schedule clause");
     case OMPD_unknown:
+    default:
       llvm_unreachable("Unknown OpenMP directive");
     }
     break;
@@ -12259,6 +12310,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_requires:
       llvm_unreachable("Unexpected OpenMP directive with schedule clause");
     case OMPD_unknown:
+    default:
       llvm_unreachable("Unknown OpenMP directive");
     }
     break;
@@ -12335,6 +12387,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_requires:
       llvm_unreachable("Unexpected OpenMP directive with num_teams-clause");
     case OMPD_unknown:
+    default:
       llvm_unreachable("Unknown OpenMP directive");
     }
     break;
@@ -12413,6 +12466,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_requires:
       llvm_unreachable("Unexpected OpenMP directive with grainsize-clause");
     case OMPD_unknown:
+    default:
       llvm_unreachable("Unknown OpenMP directive");
     }
     break;
@@ -12479,6 +12533,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
   case OMPC_exclusive:
   case OMPC_uses_allocators:
   case OMPC_affinity:
+  default:
     llvm_unreachable("Unexpected OpenMP clause.");
   }
   return CaptureRegion;
@@ -12920,6 +12975,7 @@ OMPClause *Sema::ActOnOpenMPSimpleClause(
   case OMPC_exclusive:
   case OMPC_uses_allocators:
   case OMPC_affinity:
+  default:
     llvm_unreachable("Clause is not allowed.");
   }
   return Res;
@@ -12958,10 +13014,20 @@ OMPClause *Sema::ActOnOpenMPDefaultClause(DefaultKind Kind,
         << getOpenMPClauseName(OMPC_default);
     return nullptr;
   }
-  if (Kind == OMP_DEFAULT_none)
+
+  switch (Kind) {
+  case OMP_DEFAULT_none:
     DSAStack->setDefaultDSANone(KindKwLoc);
-  else if (Kind == OMP_DEFAULT_shared)
+    break;
+  case OMP_DEFAULT_shared:
     DSAStack->setDefaultDSAShared(KindKwLoc);
+    break;
+  case OMP_DEFAULT_firstprivate:
+    DSAStack->setDefaultDSAFirstPrivate(KindKwLoc);
+    break;
+  default:
+    llvm_unreachable("DSA unexpected in OpenMP default clause");
+  }
 
   return new (Context)
       OMPDefaultClause(Kind, KindKwLoc, StartLoc, LParenLoc, EndLoc);
@@ -13148,6 +13214,7 @@ OMPClause *Sema::ActOnOpenMPSingleExprWithArgClause(
   case OMPC_exclusive:
   case OMPC_uses_allocators:
   case OMPC_affinity:
+  default:
     llvm_unreachable("Clause is not allowed.");
   }
   return Res;
@@ -13386,6 +13453,7 @@ OMPClause *Sema::ActOnOpenMPClause(OpenMPClauseKind Kind,
   case OMPC_exclusive:
   case OMPC_uses_allocators:
   case OMPC_affinity:
+  default:
     llvm_unreachable("Clause is not allowed.");
   }
   return Res;
@@ -13665,6 +13733,7 @@ OMPClause *Sema::ActOnOpenMPVarListClause(
   case OMPC_destroy:
   case OMPC_detach:
   case OMPC_uses_allocators:
+  default:
     llvm_unreachable("Clause is not allowed.");
   }
   return Res;
@@ -14722,7 +14791,7 @@ static bool checkOMPArraySectionConstantForReduction(
   if (Length == nullptr) {
     // For array sections of the form [1:] or [:], we would need to analyze
     // the lower bound...
-    if (OASE->getColonLoc().isValid())
+    if (OASE->getColonLocFirst().isValid())
       return false;
 
     // This is an array subscript which has implicit length 1!
@@ -14748,7 +14817,7 @@ static bool checkOMPArraySectionConstantForReduction(
     if (Length == nullptr) {
       // For array sections of the form [1:] or [:], we would need to analyze
       // the lower bound...
-      if (OASE->getColonLoc().isValid())
+      if (OASE->getColonLocFirst().isValid())
         return false;
 
       // This is an array subscript which has implicit length 1!
@@ -15135,6 +15204,7 @@ static bool actOnOMPReductionKindClause(
       auto *DRDRef = DeclareReductionRef.getAs<DeclRefExpr>();
       auto *DRD = cast<OMPDeclareReductionDecl>(DRDRef->getDecl());
       if (DRD->getInitializer()) {
+        S.ActOnUninitializedDecl(PrivateVD);
         Init = DRDRef;
         RHSVD->setInit(DRDRef);
         RHSVD->setInitStyle(VarDecl::CallInit);
@@ -15241,10 +15311,19 @@ static bool actOnOMPReductionKindClause(
         llvm_unreachable("Unexpected reduction operation");
       }
     }
-    if (Init && DeclareReductionRef.isUnset())
+    if (Init && DeclareReductionRef.isUnset()) {
       S.AddInitializerToDecl(RHSVD, Init, /*DirectInit=*/false);
-    else if (!Init)
+      // Store initializer for single element in private copy. Will be used
+      // during codegen.
+      PrivateVD->setInit(RHSVD->getInit());
+      PrivateVD->setInitStyle(RHSVD->getInitStyle());
+    } else if (!Init) {
       S.ActOnUninitializedDecl(RHSVD);
+      // Store initializer for single element in private copy. Will be used
+      // during codegen.
+      PrivateVD->setInit(RHSVD->getInit());
+      PrivateVD->setInitStyle(RHSVD->getInitStyle());
+    }
     if (RHSVD->isInvalidDecl())
       continue;
     if (!RHSVD->hasInit() &&
@@ -15258,10 +15337,6 @@ static bool actOnOMPReductionKindClause(
           << D;
       continue;
     }
-    // Store initializer for single element in private copy. Will be used during
-    // codegen.
-    PrivateVD->setInit(RHSVD->getInit());
-    PrivateVD->setInitStyle(RHSVD->getInitStyle());
     DeclRefExpr *PrivateDRE = buildDeclRefExpr(S, PrivateVD, PrivateTy, ELoc);
     ExprResult ReductionOp;
     if (DeclareReductionRef.isUsable()) {
@@ -16505,7 +16580,8 @@ static bool checkArrayExpressionDoesNotReferToWholeSize(Sema &SemaRef,
   // If this is an array subscript, it refers to the whole size if the size of
   // the dimension is constant and equals 1. Also, an array section assumes the
   // format of an array subscript if no colon is used.
-  if (isa<ArraySubscriptExpr>(E) || (OASE && OASE->getColonLoc().isInvalid())) {
+  if (isa<ArraySubscriptExpr>(E) ||
+      (OASE && OASE->getColonLocFirst().isInvalid())) {
     if (const auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
       return ATy->getSize().getSExtValue() != 1;
     // Size can't be evaluated statically.
@@ -16561,7 +16637,8 @@ static bool checkArrayExpressionDoesNotReferToUnitySize(Sema &SemaRef,
 
   // An array subscript always refer to a single element. Also, an array section
   // assumes the format of an array subscript if no colon is used.
-  if (isa<ArraySubscriptExpr>(E) || (OASE && OASE->getColonLoc().isInvalid()))
+  if (isa<ArraySubscriptExpr>(E) ||
+      (OASE && OASE->getColonLocFirst().isInvalid()))
     return false;
 
   assert(OASE && "Expecting array section if not an array subscript.");
@@ -16605,7 +16682,7 @@ static bool checkArrayExpressionDoesNotReferToUnitySize(Sema &SemaRef,
 //
 // We want to retrieve the member expression 'this->S';
 
-// OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.2]
+// OpenMP 5.0 [2.19.7.1, map Clause, Restrictions, p.2]
 //  If a list item is an array section, it must specify contiguous storage.
 //
 // For this restriction it is sufficient that we make sure only references

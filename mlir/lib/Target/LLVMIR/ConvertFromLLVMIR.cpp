@@ -405,6 +405,9 @@ Value Importer::processConstant(llvm::Constant *c) {
     LLVMType type = processType(c->getType());
     if (!type)
       return nullptr;
+    if (auto symbolRef = attr.dyn_cast<FlatSymbolRefAttr>())
+      return instMap[c] = bEntry.create<AddressOfOp>(unknownLoc, type,
+                                                     symbolRef.getValue());
     return instMap[c] = bEntry.create<ConstantOp>(unknownLoc, type, attr);
   }
   if (auto *cn = dyn_cast<llvm::ConstantPointerNull>(c)) {
@@ -415,8 +418,7 @@ Value Importer::processConstant(llvm::Constant *c) {
   }
   if (auto *GV = dyn_cast<llvm::GlobalVariable>(c))
     return bEntry.create<AddressOfOp>(UnknownLoc::get(context),
-                                      processGlobal(GV),
-                                      ArrayRef<NamedAttribute>());
+                                      processGlobal(GV));
 
   if (auto *ce = dyn_cast<llvm::ConstantExpr>(c)) {
     llvm::Instruction *i = ce->getAsInstruction();
@@ -724,7 +726,7 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
       if (!calledValue)
         return failure();
       ops.insert(ops.begin(), calledValue);
-      op = b.create<CallOp>(loc, tys, ops, ArrayRef<NamedAttribute>());
+      op = b.create<CallOp>(loc, tys, ops);
     }
     if (!ci->getType()->isVoidTy())
       v = op->getResult(0);
@@ -806,7 +808,7 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
     Type type = processType(inst->getType());
     if (!type)
       return failure();
-    v = b.create<GEPOp>(loc, type, ops, ArrayRef<NamedAttribute>());
+    v = b.create<GEPOp>(loc, type, ops);
     return success();
   }
   }

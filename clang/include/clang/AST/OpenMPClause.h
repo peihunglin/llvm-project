@@ -7634,6 +7634,8 @@ public:
   case llvm::omp::Clause::Enum:                                                \
     break;
 #include "llvm/Frontend/OpenMP/OMPKinds.def"
+    default:
+      break;
     }
   }
   // Base case, ignore it. :)

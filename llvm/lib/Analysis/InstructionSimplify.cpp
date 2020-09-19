@@ -3281,6 +3281,30 @@ static Value *simplifyICmpWithMinMax(CmpInst::Predicate Pred, Value *LHS,
   return nullptr;
 }
 
+static Value *simplifyICmpWithDominatingAssume(CmpInst::Predicate Predicate,
+                                               Value *LHS, Value *RHS,
+                                               const SimplifyQuery &Q) {
+  // Gracefully handle instructions that have not been inserted yet.
+  if (!Q.AC || !Q.CxtI || !Q.CxtI->getParent())
+    return nullptr;
+
+  for (Value *AssumeBaseOp : {LHS, RHS}) {
+    for (auto &AssumeVH : Q.AC->assumptionsFor(AssumeBaseOp)) {
+      if (!AssumeVH)
+        continue;
+
+      CallInst *Assume = cast<CallInst>(AssumeVH);
+      if (Optional<bool> Imp =
+              isImpliedCondition(Assume->getArgOperand(0), Predicate, LHS, RHS,
+                                 Q.DL))
+        if (isValidAssumeForContext(Assume, Q.CxtI, Q.DT))
+          return ConstantInt::get(GetCompareTy(LHS), *Imp);
+    }
+  }
+
+  return nullptr;
+}
+
 /// Given operands for an ICmpInst, see if we can fold the result.
 /// If not, this returns null.
 static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
@@ -3381,6 +3405,15 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
                                           MaxRecurse-1))
             return V;
       }
+      // Fold (zext X) ule (sext X), (zext X) sge (sext X) to true.
+      else if (SExtInst *RI = dyn_cast<SExtInst>(RHS)) {
+        if (SrcOp == RI->getOperand(0)) {
+          if (Pred == ICmpInst::ICMP_ULE || Pred == ICmpInst::ICMP_SGE)
+            return ConstantInt::getTrue(ITy);
+          if (Pred == ICmpInst::ICMP_UGT || Pred == ICmpInst::ICMP_SLT)
+            return ConstantInt::getFalse(ITy);
+        }
+      }
       // Turn icmp (zext X), Cst into a compare of X and Cst if Cst is extended
       // too.  If not, then try to deduce the result of the comparison.
       else if (ConstantInt *CI = dyn_cast<ConstantInt>(RHS)) {
@@ -3439,6 +3472,15 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
           if (Value *V = SimplifyICmpInst(Pred, SrcOp, RI->getOperand(0),
                                           Q, MaxRecurse-1))
             return V;
+      }
+      // Fold (sext X) uge (zext X), (sext X) sle (zext X) to true.
+      else if (ZExtInst *RI = dyn_cast<ZExtInst>(RHS)) {
+        if (SrcOp == RI->getOperand(0)) {
+          if (Pred == ICmpInst::ICMP_UGE || Pred == ICmpInst::ICMP_SLE)
+            return ConstantInt::getTrue(ITy);
+          if (Pred == ICmpInst::ICMP_ULT || Pred == ICmpInst::ICMP_SGT)
+            return ConstantInt::getFalse(ITy);
+        }
       }
       // Turn icmp (sext X), Cst into a compare of X and Cst if Cst is extended
       // too.  If not, then try to deduce the result of the comparison.
@@ -3513,6 +3555,9 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
     return V;
 
   if (Value *V = simplifyICmpWithMinMax(Pred, LHS, RHS, Q, MaxRecurse))
+    return V;
+
+  if (Value *V = simplifyICmpWithDominatingAssume(Pred, LHS, RHS, Q))
     return V;
 
   // Simplify comparisons of related pointers using a powerful, recursive
@@ -3765,10 +3810,10 @@ Value *llvm::SimplifyFCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
   return ::SimplifyFCmpInst(Predicate, LHS, RHS, FMF, Q, RecursionLimit);
 }
 
-/// See if V simplifies when its operand Op is replaced with RepOp.
-static const Value *SimplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
-                                           const SimplifyQuery &Q,
-                                           unsigned MaxRecurse) {
+static Value *SimplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
+                                     const SimplifyQuery &Q,
+                                     bool AllowRefinement,
+                                     unsigned MaxRecurse) {
   // Trivial replacement.
   if (V == Op)
     return RepOp;
@@ -3781,23 +3826,19 @@ static const Value *SimplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
   if (!I)
     return nullptr;
 
+  // Consider:
+  //   %cmp = icmp eq i32 %x, 2147483647
+  //   %add = add nsw i32 %x, 1
+  //   %sel = select i1 %cmp, i32 -2147483648, i32 %add
+  //
+  // We can't replace %sel with %add unless we strip away the flags (which will
+  // be done in InstCombine).
+  // TODO: This is unsound, because it only catches some forms of refinement.
+  if (!AllowRefinement && canCreatePoison(I))
+    return nullptr;
+
   // If this is a binary operator, try to simplify it with the replaced op.
   if (auto *B = dyn_cast<BinaryOperator>(I)) {
-    // Consider:
-    //   %cmp = icmp eq i32 %x, 2147483647
-    //   %add = add nsw i32 %x, 1
-    //   %sel = select i1 %cmp, i32 -2147483648, i32 %add
-    //
-    // We can't replace %sel with %add unless we strip away the flags.
-    // TODO: This is an unusual limitation because better analysis results in
-    //       worse simplification. InstCombine can do this fold more generally
-    //       by dropping the flags. Remove this fold to save compile-time?
-    if (isa<OverflowingBinaryOperator>(B))
-      if (Q.IIQ.hasNoSignedWrap(B) || Q.IIQ.hasNoUnsignedWrap(B))
-        return nullptr;
-    if (isa<PossiblyExactOperator>(B) && Q.IIQ.isExact(B))
-      return nullptr;
-
     if (MaxRecurse) {
       if (B->getOperand(0) == Op)
         return SimplifyBinOp(B->getOpcode(), RepOp, B->getOperand(1), Q,
@@ -3864,6 +3905,13 @@ static const Value *SimplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
   return nullptr;
 }
 
+Value *llvm::SimplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
+                                    const SimplifyQuery &Q,
+                                    bool AllowRefinement) {
+  return ::SimplifyWithOpReplaced(V, Op, RepOp, Q, AllowRefinement,
+                                  RecursionLimit);
+}
+
 /// Try to simplify a select instruction when its condition operand is an
 /// integer comparison where one operand of the compare is a constant.
 static Value *simplifySelectBitTest(Value *TrueVal, Value *FalseVal, Value *X,
@@ -3923,12 +3971,18 @@ static Value *simplifySelectWithICmpCond(Value *CondVal, Value *TrueVal,
   if (!match(CondVal, m_ICmp(Pred, m_Value(CmpLHS), m_Value(CmpRHS))))
     return nullptr;
 
-  if (ICmpInst::isEquality(Pred) && match(CmpRHS, m_Zero())) {
+  // Canonicalize ne to eq predicate.
+  if (Pred == ICmpInst::ICMP_NE) {
+    Pred = ICmpInst::ICMP_EQ;
+    std::swap(TrueVal, FalseVal);
+  }
+
+  if (Pred == ICmpInst::ICMP_EQ && match(CmpRHS, m_Zero())) {
     Value *X;
     const APInt *Y;
     if (match(CmpLHS, m_And(m_Value(X), m_APInt(Y))))
       if (Value *V = simplifySelectBitTest(TrueVal, FalseVal, X, Y,
-                                           Pred == ICmpInst::ICMP_EQ))
+                                           /*TrueWhenUnset=*/true))
         return V;
 
     // Test for a bogus zero-shift-guard-op around funnel-shift or rotate.
@@ -3939,13 +3993,7 @@ static Value *simplifySelectWithICmpCond(Value *CondVal, Value *TrueVal,
                                                           m_Value(ShAmt)));
     // (ShAmt == 0) ? fshl(X, *, ShAmt) : X --> X
     // (ShAmt == 0) ? fshr(*, X, ShAmt) : X --> X
-    if (match(TrueVal, isFsh) && FalseVal == X && CmpLHS == ShAmt &&
-        Pred == ICmpInst::ICMP_EQ)
-      return X;
-    // (ShAmt != 0) ? X : fshl(X, *, ShAmt) --> X
-    // (ShAmt != 0) ? X : fshr(*, X, ShAmt) --> X
-    if (match(FalseVal, isFsh) && TrueVal == X && CmpLHS == ShAmt &&
-        Pred == ICmpInst::ICMP_NE)
+    if (match(TrueVal, isFsh) && FalseVal == X && CmpLHS == ShAmt)
       return X;
 
     // Test for a zero-shift-guard-op around rotates. These are used to
@@ -3959,11 +4007,6 @@ static Value *simplifySelectWithICmpCond(Value *CondVal, Value *TrueVal,
                                 m_Intrinsic<Intrinsic::fshr>(m_Value(X),
                                                              m_Deferred(X),
                                                              m_Value(ShAmt)));
-    // (ShAmt != 0) ? fshl(X, X, ShAmt) : X --> fshl(X, X, ShAmt)
-    // (ShAmt != 0) ? fshr(X, X, ShAmt) : X --> fshr(X, X, ShAmt)
-    if (match(TrueVal, isRotate) && FalseVal == X && CmpLHS == ShAmt &&
-        Pred == ICmpInst::ICMP_NE)
-      return TrueVal;
     // (ShAmt == 0) ? X : fshl(X, X, ShAmt) --> fshl(X, X, ShAmt)
     // (ShAmt == 0) ? X : fshr(X, X, ShAmt) --> fshr(X, X, ShAmt)
     if (match(FalseVal, isRotate) && TrueVal == X && CmpLHS == ShAmt &&
@@ -3980,27 +4023,20 @@ static Value *simplifySelectWithICmpCond(Value *CondVal, Value *TrueVal,
   // arms of the select. See if substituting this value into the arm and
   // simplifying the result yields the same value as the other arm.
   if (Pred == ICmpInst::ICMP_EQ) {
-    if (SimplifyWithOpReplaced(FalseVal, CmpLHS, CmpRHS, Q, MaxRecurse) ==
+    if (SimplifyWithOpReplaced(FalseVal, CmpLHS, CmpRHS, Q,
+                               /* AllowRefinement */ false, MaxRecurse) ==
             TrueVal ||
-        SimplifyWithOpReplaced(FalseVal, CmpRHS, CmpLHS, Q, MaxRecurse) ==
+        SimplifyWithOpReplaced(FalseVal, CmpRHS, CmpLHS, Q,
+                               /* AllowRefinement */ false, MaxRecurse) ==
             TrueVal)
       return FalseVal;
-    if (SimplifyWithOpReplaced(TrueVal, CmpLHS, CmpRHS, Q, MaxRecurse) ==
+    if (SimplifyWithOpReplaced(TrueVal, CmpLHS, CmpRHS, Q,
+                               /* AllowRefinement */ true, MaxRecurse) ==
             FalseVal ||
-        SimplifyWithOpReplaced(TrueVal, CmpRHS, CmpLHS, Q, MaxRecurse) ==
+        SimplifyWithOpReplaced(TrueVal, CmpRHS, CmpLHS, Q,
+                               /* AllowRefinement */ true, MaxRecurse) ==
             FalseVal)
       return FalseVal;
-  } else if (Pred == ICmpInst::ICMP_NE) {
-    if (SimplifyWithOpReplaced(TrueVal, CmpLHS, CmpRHS, Q, MaxRecurse) ==
-            FalseVal ||
-        SimplifyWithOpReplaced(TrueVal, CmpRHS, CmpLHS, Q, MaxRecurse) ==
-            FalseVal)
-      return TrueVal;
-    if (SimplifyWithOpReplaced(FalseVal, CmpLHS, CmpRHS, Q, MaxRecurse) ==
-            TrueVal ||
-        SimplifyWithOpReplaced(FalseVal, CmpRHS, CmpLHS, Q, MaxRecurse) ==
-            TrueVal)
-      return TrueVal;
   }
 
   return nullptr;

@@ -28,6 +28,7 @@
 #include "lld/Common/Strings.h"
 #include "lld/Common/Version.h"
 #include "llvm/ADT/SetOperations.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugPubTable.h"
@@ -2653,15 +2654,6 @@ void GdbIndexSection::initOutputSize() {
   }
 }
 
-static std::vector<InputSection *> getDebugInfoSections() {
-  std::vector<InputSection *> ret;
-  for (InputSectionBase *s : inputSections)
-    if (InputSection *isec = dyn_cast<InputSection>(s))
-      if (isec->name == ".debug_info")
-        ret.push_back(isec);
-  return ret;
-}
-
 static std::vector<GdbIndexSection::CuEntry> readCuList(DWARFContext &dwarf) {
   std::vector<GdbIndexSection::CuEntry> ret;
   for (std::unique_ptr<DWARFUnit> &cu : dwarf.compile_units())
@@ -2705,12 +2697,16 @@ template <class ELFT>
 static std::vector<GdbIndexSection::NameAttrEntry>
 readPubNamesAndTypes(const LLDDwarfObj<ELFT> &obj,
                      const std::vector<GdbIndexSection::CuEntry> &cus) {
-  const DWARFSection &pubNames = obj.getGnuPubnamesSection();
-  const DWARFSection &pubTypes = obj.getGnuPubtypesSection();
+  const LLDDWARFSection &pubNames = obj.getGnuPubnamesSection();
+  const LLDDWARFSection &pubTypes = obj.getGnuPubtypesSection();
 
   std::vector<GdbIndexSection::NameAttrEntry> ret;
-  for (const DWARFSection *pub : {&pubNames, &pubTypes}) {
-    DWARFDebugPubTable table(obj, *pub, config->isLE, true);
+  for (const LLDDWARFSection *pub : {&pubNames, &pubTypes}) {
+    DWARFDataExtractor data(obj, *pub, config->isLE, config->wordsize);
+    DWARFDebugPubTable table;
+    table.extract(data, /*GnuStyle=*/true, [&](Error e) {
+      warn(toString(pub->sec) + ": " + toString(std::move(e)));
+    });
     for (const DWARFDebugPubTable::Set &set : table.getData()) {
       // The value written into the constant pool is kind << 24 | cuIndex. As we
       // don't know how many compilation units precede this object to compute
@@ -2811,30 +2807,40 @@ createSymbols(ArrayRef<std::vector<GdbIndexSection::NameAttrEntry>> nameAttrs,
 
 // Returns a newly-created .gdb_index section.
 template <class ELFT> GdbIndexSection *GdbIndexSection::create() {
-  std::vector<InputSection *> sections = getDebugInfoSections();
-
-  // .debug_gnu_pub{names,types} are useless in executables.
-  // They are present in input object files solely for creating
-  // a .gdb_index. So we can remove them from the output.
-  for (InputSectionBase *s : inputSections)
+  // Collect InputFiles with .debug_info. See the comment in
+  // LLDDwarfObj<ELFT>::LLDDwarfObj. If we do lightweight parsing in the future,
+  // note that isec->data() may uncompress the full content, which should be
+  // parallelized.
+  SetVector<InputFile *> files;
+  for (InputSectionBase *s : inputSections) {
+    InputSection *isec = dyn_cast<InputSection>(s);
+    if (!isec)
+      continue;
+    // .debug_gnu_pub{names,types} are useless in executables.
+    // They are present in input object files solely for creating
+    // a .gdb_index. So we can remove them from the output.
     if (s->name == ".debug_gnu_pubnames" || s->name == ".debug_gnu_pubtypes")
       s->markDead();
+    else if (isec->name == ".debug_info")
+      files.insert(isec->file);
+  }
 
-  std::vector<GdbChunk> chunks(sections.size());
-  std::vector<std::vector<NameAttrEntry>> nameAttrs(sections.size());
+  std::vector<GdbChunk> chunks(files.size());
+  std::vector<std::vector<NameAttrEntry>> nameAttrs(files.size());
 
-  parallelForEachN(0, sections.size(), [&](size_t i) {
+  parallelForEachN(0, files.size(), [&](size_t i) {
     // To keep memory usage low, we don't want to keep cached DWARFContext, so
     // avoid getDwarf() here.
-    ObjFile<ELFT> *file = sections[i]->getFile<ELFT>();
+    ObjFile<ELFT> *file = cast<ObjFile<ELFT>>(files[i]);
     DWARFContext dwarf(std::make_unique<LLDDwarfObj<ELFT>>(file));
+    auto &dobj = static_cast<const LLDDwarfObj<ELFT> &>(dwarf.getDWARFObj());
 
-    chunks[i].sec = sections[i];
+    // If the are multiple compile units .debug_info (very rare ld -r --unique),
+    // this only picks the last one. Other address ranges are lost.
+    chunks[i].sec = dobj.getInfoSection();
     chunks[i].compilationUnits = readCuList(dwarf);
-    chunks[i].addressAreas = readAddressAreas(dwarf, sections[i]);
-    nameAttrs[i] = readPubNamesAndTypes<ELFT>(
-        static_cast<const LLDDwarfObj<ELFT> &>(dwarf.getDWARFObj()),
-        chunks[i].compilationUnits);
+    chunks[i].addressAreas = readAddressAreas(dwarf, chunks[i].sec);
+    nameAttrs[i] = readPubNamesAndTypes<ELFT>(dobj, chunks[i].compilationUnits);
   });
 
   auto *ret = make<GdbIndexSection>();

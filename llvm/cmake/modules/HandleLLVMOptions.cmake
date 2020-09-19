@@ -12,6 +12,7 @@ include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 include(CheckSymbolExists)
 include(CMakeDependentOption)
+include(LLVMProcessSources)
 
 if(CMAKE_LINKER MATCHES "lld-link" OR (MSVC AND (LLVM_USE_LINKER STREQUAL "lld" OR LLVM_ENABLE_LLD)))
   set(LINKER_IS_LLD_LINK TRUE)
@@ -27,7 +28,7 @@ string(TOUPPER "${LLVM_ENABLE_LTO}" uppercase_LLVM_ENABLE_LTO)
 set(LLVM_PARALLEL_COMPILE_JOBS "" CACHE STRING
   "Define the maximum number of concurrent compilation jobs (Ninja only).")
 if(LLVM_PARALLEL_COMPILE_JOBS)
-  if(NOT CMAKE_MAKE_PROGRAM MATCHES "ninja")
+  if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
     message(WARNING "Job pooling is only available with Ninja generators.")
   else()
     set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_job_pool=${LLVM_PARALLEL_COMPILE_JOBS})
@@ -37,7 +38,7 @@ endif()
 
 set(LLVM_PARALLEL_LINK_JOBS "" CACHE STRING
   "Define the maximum number of concurrent link jobs (Ninja only).")
-if(CMAKE_MAKE_PROGRAM MATCHES "ninja")
+if(CMAKE_GENERATOR STREQUAL "Ninja")
   if(NOT LLVM_PARALLEL_LINK_JOBS AND uppercase_LLVM_ENABLE_LTO STREQUAL "THIN")
     message(STATUS "ThinLTO provides its own parallel linking - limiting parallel link jobs to 2.")
     set(LLVM_PARALLEL_LINK_JOBS "2")
@@ -290,6 +291,15 @@ if( LLVM_ENABLE_PIC )
   if(CMAKE_COMPILER_IS_GNUCXX AND LLVM_NATIVE_ARCH STREQUAL "Mips" AND
          NOT Uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     add_flag_or_print_warning("-fno-shrink-wrap" FNO_SHRINK_WRAP)
+  endif()
+  # gcc with -O3 -fPIC generates TLS sequences that violate the spec on
+  # Solaris/sparcv9, causing executables created with the system linker
+  # to SEGV (GCC PR target/96607).
+  # clang with -O3 -fPIC generates code that SEGVs.
+  # Both can be worked around by compiling with -O instead.
+  if(${CMAKE_SYSTEM_NAME} STREQUAL "SunOS" AND LLVM_NATIVE_ARCH STREQUAL "Sparc")
+    llvm_replace_compiler_option(CMAKE_CXX_FLAGS_RELEASE "-O[23]" "-O")
+    llvm_replace_compiler_option(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O[23]" "-O")
   endif()
 endif()
 
@@ -911,6 +921,7 @@ if (CLANG_CL AND (LLVM_BUILD_INSTRUMENTED OR LLVM_USE_SANITIZER))
   file(TO_CMAKE_PATH "${clang_resource_dir}" clang_resource_dir)
   append("/libpath:${clang_resource_dir}/lib/windows"
     CMAKE_EXE_LINKER_FLAGS
+    CMAKE_MODULE_LINKER_FLAGS
     CMAKE_SHARED_LINKER_FLAGS)
 endif()
 
