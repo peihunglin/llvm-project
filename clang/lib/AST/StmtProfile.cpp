@@ -539,8 +539,8 @@ void OMPClauseProfiler::VisitOMPNogroupClause(const OMPNogroupClause *) {}
 void OMPClauseProfiler::VisitOMPDestroyClause(const OMPDestroyClause *) {}
 
 void OMPClauseProfiler::VisitOMPWhenClause(const OMPWhenClause *C) {
-  if (C->getExpr())
-    Profiler->VisitStmt(C->getExpr());
+  if (C->getDirectiveVariant())
+    Profiler->VisitStmt(C->getDirectiveVariant());
 }
 
 template<typename T>

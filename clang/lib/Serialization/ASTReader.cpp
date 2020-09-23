@@ -12913,7 +12913,6 @@ void OMPClauseReader::VisitOMPOrderClause(OMPOrderClause *C) {
 }
 
 void OMPClauseReader::VisitOMPWhenClause(OMPWhenClause *C) {
-  C->setExpr(Record.readSubExpr());
   C->setLParenLoc(Record.readSourceLocation());
 }
 

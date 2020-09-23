@@ -2306,12 +2306,13 @@ OMPMetadirectiveDirective *OMPMetadirectiveDirective::Create(const ASTContext &C
                                            SourceLocation StartLoc,
                                            SourceLocation EndLoc,
                                            ArrayRef<OMPClause *> Clauses,
-                                           Stmt *AssociatedStmt) {
+                                           Stmt *AssociatedStmt, Stmt *IfStmt) {
   unsigned Size = llvm::alignTo(sizeof(OMPMetadirectiveDirective), alignof(OMPClause *));
   void *Mem = C.Allocate(Size + sizeof(OMPClause *) * Clauses.size() + sizeof(Stmt *));
   auto *Dir = new (Mem) OMPMetadirectiveDirective(StartLoc, EndLoc, Clauses.size());
   Dir->setClauses(Clauses);
   Dir->setAssociatedStmt(AssociatedStmt);
+  Dir->setIfStmt(IfStmt);
   return Dir;
 }
 

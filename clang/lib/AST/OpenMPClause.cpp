@@ -1724,13 +1724,27 @@ void OMPClausePrinter::VisitOMPDestroyClause(OMPDestroyClause *) {
 }
 
 void OMPClausePrinter::VisitOMPWhenClause(OMPWhenClause *Node) {
-  if (Node->getExpr() != NULL) {
-    OS << "when(";
-    Node->getExpr()->printPretty(OS, nullptr, Policy, 0);
-    OS << ": ";
-  } else {
+  if (Node->getTI().Sets.size() == 0) {
     OS << "default(";
+    return;
   }
+  OS << "when(";
+  int count = 0;
+  for (const OMPTraitSet &Set : Node->getTI().Sets) {
+    if (count == 0)
+      count++;
+    else
+      OS << ", ";
+ 
+    for (const OMPTraitSelector &Selector : Set.Selectors) {
+      switch (Selector.Kind) {
+// Pei-Hung: this needs to be done!
+        default:
+          break;
+      }
+    }
+  }
+  OS << ": ";
 }
 
 template<typename T>

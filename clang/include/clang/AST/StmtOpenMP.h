@@ -4937,7 +4937,7 @@ public:
   ///
   static OMPMetadirectiveDirective *Create(const ASTContext &C, SourceLocation StartLoc,
                                   SourceLocation EndLoc,
-                                  ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt);
+                                  ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt, Stmt *IfStmt);
 
   /// Creates an empty directive with the place for \a NumClauses
   /// clauses.

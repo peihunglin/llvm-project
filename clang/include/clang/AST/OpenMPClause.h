@@ -7534,6 +7534,66 @@ public:
 };
 
 
+struct OMPTraitProperty {
+  llvm::omp::TraitProperty Kind = llvm::omp::TraitProperty::invalid;
+};
+struct OMPTraitSelector {
+  Expr *ScoreOrCondition = nullptr;
+  llvm::omp::TraitSelector Kind = llvm::omp::TraitSelector::invalid;
+  llvm::SmallVector<OMPTraitProperty, 1> Properties;
+};
+struct OMPTraitSet {
+  llvm::omp::TraitSet Kind = llvm::omp::TraitSet::invalid;
+  llvm::SmallVector<OMPTraitSelector, 2> Selectors;
+};
+
+/// Helper data structure representing the traits in a match clause of an
+/// `declare variant` or `metadirective`. The outer level is an ordered
+/// collection of selector sets, each with an associated kind and an ordered
+/// collection of selectors. A selector has a kind, an optional score/condition,
+/// and an ordered collection of properties.
+class OMPTraitInfo {
+  /// Private constructor accesible only by ASTContext.
+  OMPTraitInfo() {}
+  friend class ASTContext;
+
+public:
+  /// Reconstruct a (partial) OMPTraitInfo object from a mangled name.
+  OMPTraitInfo(StringRef MangledName);
+
+  /// The outermost level of selector sets.
+  llvm::SmallVector<OMPTraitSet, 2> Sets;
+
+  bool anyScoreOrCondition(
+      llvm::function_ref<bool(Expr *&, bool /* IsScore */)> Cond) {
+    return llvm::any_of(Sets, [&](OMPTraitSet &Set) {
+      return llvm::any_of(
+          Set.Selectors, [&](OMPTraitSelector &Selector) {
+            return Cond(Selector.ScoreOrCondition,
+                        /* IsScore */ Selector.Kind !=
+                            llvm::omp::TraitSelector::user_condition);
+          });
+    });
+  }
+
+  /// Create a variant match info object from this trait info object. While the
+  /// former is a flat representation the actual main difference is that the
+  /// latter uses clang::Expr to store the score/condition while the former is
+  /// independent of clang. Thus, expressions and conditions are evaluated in
+  /// this method.
+  void getAsVariantMatchInfo(ASTContext &ASTCtx,
+                             llvm::omp::VariantMatchInfo &VMI) const;
+
+  /// Return a string representation identifying this context selector.
+  std::string getMangledName() const;
+
+  /// Print a human readable representation into \p OS.
+  void print(llvm::raw_ostream &OS, const PrintingPolicy &Policy) const;
+};
+llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const OMPTraitInfo &TI);
+llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const OMPTraitInfo *TI);
+
+
 /// This represents clause 'when' in the '#pragma omp metadirective' directive.
 ///
 /// \code
@@ -7544,13 +7604,11 @@ class OMPWhenClause final : public OMPClause {
 
   friend class OMPClauseReader;
 
-  Expr *CondExpr;
+  OMPTraitInfo *TI;
 
   OpenMPDirectiveKind DKind;
 
   Stmt *DirectiveVariant;
-
-  Stmt *InnerStmt;
 
   /// Location of '('.
   SourceLocation LParenLoc;
@@ -7558,13 +7616,11 @@ class OMPWhenClause final : public OMPClause {
   /// Location of ':' (if any).
   SourceLocation ColonLoc;
 
-  void setExpr(Expr *E) { CondExpr = E; }
-
 public:
-  OMPWhenClause(Expr *expr, OpenMPDirectiveKind dKind,
+  OMPWhenClause(OMPTraitInfo &T, OpenMPDirectiveKind dKind,
                 Stmt *dvariant, SourceLocation StartLoc,
                 SourceLocation LParenLoc, SourceLocation EndLoc)
-      : OMPClause(llvm::omp::OMPC_when, StartLoc, EndLoc), CondExpr(expr), DKind(dKind),
+      : OMPClause(llvm::omp::OMPC_when, StartLoc, EndLoc), TI(&T), DKind(dKind),
         DirectiveVariant(dvariant), LParenLoc(LParenLoc) {}
 
   OMPWhenClause(SourceLocation StartLoc, SourceLocation EndLoc)
@@ -7579,15 +7635,12 @@ public:
   /// Returns the location of '('.
   SourceLocation getLParenLoc() const { return LParenLoc; }
 
-  /// Returns the associated condition expression
-  Expr *getExpr() const { return CondExpr; }
+  Stmt *getDirectiveVariant() const { return DirectiveVariant; }
+
+  /// Returns the OMPTraitInfo
+  OMPTraitInfo &getTI() { return *TI; }
 
   /// Set the inner statement
-  void setInnerStmt(Stmt *s) { InnerStmt = s; }
-
-  /// Returns the inner statement
-  Stmt *getInnerStmt() { return InnerStmt; }
-
   child_range children() {
     return child_range(child_iterator(), child_iterator());
   }
@@ -7668,66 +7721,6 @@ public:
   void Visit##Class(Class *S);
 #include "llvm/Frontend/OpenMP/OMPKinds.def"
 };
-
-struct OMPTraitProperty {
-  llvm::omp::TraitProperty Kind = llvm::omp::TraitProperty::invalid;
-};
-struct OMPTraitSelector {
-  Expr *ScoreOrCondition = nullptr;
-  llvm::omp::TraitSelector Kind = llvm::omp::TraitSelector::invalid;
-  llvm::SmallVector<OMPTraitProperty, 1> Properties;
-};
-struct OMPTraitSet {
-  llvm::omp::TraitSet Kind = llvm::omp::TraitSet::invalid;
-  llvm::SmallVector<OMPTraitSelector, 2> Selectors;
-};
-
-/// Helper data structure representing the traits in a match clause of an
-/// `declare variant` or `metadirective`. The outer level is an ordered
-/// collection of selector sets, each with an associated kind and an ordered
-/// collection of selectors. A selector has a kind, an optional score/condition,
-/// and an ordered collection of properties.
-class OMPTraitInfo {
-  /// Private constructor accesible only by ASTContext.
-  OMPTraitInfo() {}
-  friend class ASTContext;
-
-public:
-  /// Reconstruct a (partial) OMPTraitInfo object from a mangled name.
-  OMPTraitInfo(StringRef MangledName);
-
-  /// The outermost level of selector sets.
-  llvm::SmallVector<OMPTraitSet, 2> Sets;
-
-  bool anyScoreOrCondition(
-      llvm::function_ref<bool(Expr *&, bool /* IsScore */)> Cond) {
-    return llvm::any_of(Sets, [&](OMPTraitSet &Set) {
-      return llvm::any_of(
-          Set.Selectors, [&](OMPTraitSelector &Selector) {
-            return Cond(Selector.ScoreOrCondition,
-                        /* IsScore */ Selector.Kind !=
-                            llvm::omp::TraitSelector::user_condition);
-          });
-    });
-  }
-
-  /// Create a variant match info object from this trait info object. While the
-  /// former is a flat representation the actual main difference is that the
-  /// latter uses clang::Expr to store the score/condition while the former is
-  /// independent of clang. Thus, expressions and conditions are evaluated in
-  /// this method.
-  void getAsVariantMatchInfo(ASTContext &ASTCtx,
-                             llvm::omp::VariantMatchInfo &VMI) const;
-
-  /// Return a string representation identifying this context selector.
-  std::string getMangledName() const;
-
-  /// Print a human readable representation into \p OS.
-  void print(llvm::raw_ostream &OS, const PrintingPolicy &Policy) const;
-};
-llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const OMPTraitInfo &TI);
-llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const OMPTraitInfo *TI);
-
 } // namespace clang
 
 #endif // LLVM_CLANG_AST_OPENMPCLAUSE_H

@@ -5304,6 +5304,7 @@ static void emitOMPAtomicExpr(CodeGenFunction &CGF, OpenMPClauseKind Kind,
   case OMPC_exclusive:
   case OMPC_uses_allocators:
   case OMPC_affinity:
+  case OMPC_when:
   default:
     llvm_unreachable("Clause is not allowed in 'omp atomic'.");
   }
@@ -6636,10 +6637,6 @@ void CodeGenFunction::EmitSimpleOMPExecutableDirective(
 }
 
 void CodeGenFunction::EmitOMPMetadirectiveDirective(const OMPMetadirectiveDirective &S) {
-  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-    CGF.EmitStmt(S.getInnermostCapturedStmt()->getCapturedStmt());
-  };
-  OMPLexicalScope Scope(*this, S, OMPD_unknown);
-  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_metadirective, CodeGen);
+  EmitStmt(S.getIfStmt());
 }
 

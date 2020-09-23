@@ -9482,8 +9482,14 @@ StmtResult Sema::ActOnOpenMPMetadirectiveDirective(ArrayRef<OMPClause *> Clauses
   if (!AStmt)
     return StmtError();
 
+  auto *CS = cast<CapturedStmt>(AStmt);
+
+  StmtResult IfStmt = StmtError();
+  Stmt *ElseStmt = NULL;
+  // Pei-Hung: this has more to be done
+
   //assert(Clauses.size() < 1 && "Extra clauses in metadirective directive");
-  return OMPMetadirectiveDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt);
+  return OMPMetadirectiveDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt, IfStmt.get());
 }
 
 namespace {
@@ -13560,10 +13566,10 @@ OMPClause *Sema::ActOnOpenMPDestroyClause(SourceLocation StartLoc,
   return new (Context) OMPDestroyClause(StartLoc, EndLoc);
 }
 
-OMPClause *Sema::ActOnOpenMPWhenClause(Expr *expr, OpenMPDirectiveKind dKind,
+OMPClause *Sema::ActOnOpenMPWhenClause(OMPTraitInfo &TI, OpenMPDirectiveKind dKind,
                                        Stmt *dvariant, SourceLocation StartLoc,
                                        SourceLocation LParenLoc, SourceLocation EndLoc) {
-  return new (Context) OMPWhenClause(expr, dKind, dvariant, StartLoc, LParenLoc, EndLoc);
+  return new (Context) OMPWhenClause(TI, dKind, dvariant, StartLoc, LParenLoc, EndLoc);
 }
 
 OMPClause *Sema::ActOnOpenMPVarListClause(

@@ -644,9 +644,8 @@ void StmtPrinter::PrintOMPExecutableDirective(OMPExecutableDirective *S,
     if (Clause && !Clause->isImplicit()) {
       OS << ' ';
       Printer.Visit(Clause);
-      if (dyn_cast<OMPMetadirectiveDirective>(S)) {
-        OMPWhenClause *c = dyn_cast<OMPWhenClause>(Clause);
-        if (c != NULL) {
+      if (auto *metadirectiveDir = dyn_cast<OMPMetadirectiveDirective>(S)) {
+        if (OMPWhenClause *c = dyn_cast<OMPWhenClause>(Clause)) {
           if (c->getDKind() != llvm::omp::OMPD_unknown)
             OS << getOpenMPDirectiveName(c->getDKind());
           OS << ")";
