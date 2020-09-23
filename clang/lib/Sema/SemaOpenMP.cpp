@@ -5381,8 +5381,6 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     break;
   case OMPD_metadirective:
     llvm::errs() <<"metadirective is caught\n";
-//    assert(AStmt == nullptr && 
-//	"No associated statement allowed for 'omp metadirective' directive");
     Res = ActOnOpenMPMetadirectiveDirective(ClausesWithImplicit, AStmt, StartLoc, EndLoc);
     if (LangOpts.OpenMP >= 50)
       AllowedNameModifiers.push_back(OMPD_metadirective);
