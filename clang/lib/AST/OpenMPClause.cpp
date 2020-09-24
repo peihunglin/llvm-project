@@ -20,6 +20,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Frontend/OpenMP/OMPContext.h"
 #include <algorithm>
 #include <cassert>
 
@@ -1738,9 +1739,65 @@ void OMPClausePrinter::VisitOMPWhenClause(OMPWhenClause *Node) {
  
     for (const OMPTraitSelector &Selector : Set.Selectors) {
       switch (Selector.Kind) {
-// Pei-Hung: this needs to be done!
-        default:
-          break;
+      case TraitSelector::device_kind: {
+        OS << "device={kind(";
+        for (const OMPTraitProperty &Property : Selector.Properties) {
+          OS << getOpenMPContextTraitPropertyName(Property.Kind);
+        }
+        OS << ")}";
+        break;
+      }
+      case TraitSelector::device_arch: {
+        OS << "device={arch(";
+        for (const OMPTraitProperty &Property : Selector.Properties) {
+          OS << getOpenMPContextTraitPropertyName(Property.Kind);
+        }
+        OS << ")}";
+        break;
+      }
+      case TraitSelector::device_isa: {
+        OS << "device={isa(";
+        for (const OMPTraitProperty &Property : Selector.Properties) {
+          OS << getOpenMPContextTraitPropertyName(Property.Kind);
+        }
+        OS << ")}";
+        break;
+      }
+      case TraitSelector::implementation_vendor: {
+        OS << "implementation={vendor(";
+        for (const OMPTraitProperty &Property : Selector.Properties) {
+          OS << getOpenMPContextTraitPropertyName(Property.Kind);
+        }
+        OS << ")}";
+        break;
+      }
+      case TraitSelector::implementation_extension: {
+        OS << "implementation={extension(";
+        for (const OMPTraitProperty &Property : Selector.Properties) {
+          OS << getOpenMPContextTraitPropertyName(Property.Kind);
+        }
+        OS << ")}";
+        break;
+      }
+      case TraitSelector::user_condition: {
+        OS << "user={condition(";
+        Selector.ScoreOrCondition->printPretty(OS, nullptr, Policy, 0);
+        OS << ")}";
+        break;
+      }
+      case TraitSelector::invalid:
+      case TraitSelector::construct_target:
+      case TraitSelector::construct_teams:
+      case TraitSelector::construct_parallel:
+      case TraitSelector::construct_for:
+      case TraitSelector::construct_simd:
+      case TraitSelector::implementation_unified_address:
+      case TraitSelector::implementation_unified_shared_memory:
+      case TraitSelector::implementation_reverse_offload:
+      case TraitSelector::implementation_dynamic_allocators:
+      case TraitSelector::implementation_atomic_default_mem_order:
+      default:
+        break;
       }
     }
   }
