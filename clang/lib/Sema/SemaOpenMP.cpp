@@ -36,6 +36,7 @@
 #include "llvm/ADT/PointerEmbeddedInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
+#include "llvm/Frontend/OpenMP/OMPContext.h"
 #include <set>
 
 using namespace clang;
@@ -9481,12 +9482,99 @@ StmtResult Sema::ActOnOpenMPMetadirectiveDirective(ArrayRef<OMPClause *> Clauses
     return StmtError();
 
   auto *CS = cast<CapturedStmt>(AStmt);
+  CS->getCapturedDecl()->setNothrow();
 
   StmtResult IfStmt = StmtError();
-  Stmt *ElseStmt = NULL;
-  // Pei-Hung: this has more to be done
+  Stmt *ElseStmt = nullptr;
+  for (auto i = Clauses.rbegin(); i < Clauses.rend(); i++) {
+    OMPWhenClause *WhenClause = dyn_cast<OMPWhenClause>(*i);
+    Expr *WhenCondExpr = nullptr;
+    Stmt *ThenStmt = nullptr;
 
-  //assert(Clauses.size() < 1 && "Extra clauses in metadirective directive");
+    OpenMPDirectiveKind DKind = WhenClause->getDKind();
+
+    if (DKind != OMPD_unknown)
+      ThenStmt = CompoundStmt::Create(Context, {WhenClause->getDirectiveVariant()},
+                                      SourceLocation(), SourceLocation());
+
+    for (const OMPTraitSet &Set : WhenClause->getTI().Sets) {
+      for (const OMPTraitSelector &Selector : Set.Selectors) {
+        switch (Selector.Kind) {
+          case TraitSelector::user_condition: {
+          assert(Selector.ScoreOrCondition &&
+                 "Ill-formed user condition, expected condition expression!");
+
+          WhenCondExpr = Selector.ScoreOrCondition;
+          break;
+        }
+        case TraitSelector::device_arch: {
+          bool archMatch = false;
+          for (const OMPTraitProperty &Property : Selector.Properties) {
+            for (const auto &T : getLangOpts().OMPTargetTriples) {
+              if (T.getArchName() == getOpenMPContextTraitPropertyName(Property.Kind)) {
+                archMatch = true;
+                break;
+              }
+            }
+            if (archMatch)
+              break;
+          }
+          // Create a true/false boolean expression and assign to WhenCondExpr
+          auto *C = new (Context)
+              CXXBoolLiteralExpr(archMatch, Context.BoolTy, StartLoc);
+          WhenCondExpr = dyn_cast<Expr>(C);
+          break;
+        }
+        case TraitSelector::implementation_vendor: {
+          bool vendorMatch = false;
+          for (const OMPTraitProperty &Property : Selector.Properties) {
+            for (auto &T : getLangOpts().OMPTargetTriples) {
+              if (T.getVendorName() == getOpenMPContextTraitPropertyName(Property.Kind)) {
+                vendorMatch = true;
+                break;
+              }
+            }
+            if (vendorMatch)
+              break;
+          }
+          // Create a true/false boolean expression and assign to WhenCondExpr
+          auto *C = new (Context)
+              CXXBoolLiteralExpr(vendorMatch, Context.BoolTy, StartLoc);
+          WhenCondExpr = dyn_cast<Expr>(C);
+          break;
+        }
+        case TraitSelector::device_isa:
+        case TraitSelector::device_kind:
+        case TraitSelector::implementation_extension:
+        default:
+          break;
+        }
+      }
+    }
+    if (WhenCondExpr == NULL) {
+      if (ElseStmt != NULL) {
+        Diag(WhenClause->getBeginLoc(), diag::err_omp_misplaced_default_clause);
+        return StmtError();
+      }
+      if (DKind == OMPD_unknown)
+        ElseStmt = CompoundStmt::Create(Context, {CS->getCapturedStmt()},
+                                        SourceLocation(), SourceLocation());
+      else
+        ElseStmt = ThenStmt;
+      continue;
+    }
+
+    if (ThenStmt == NULL)
+      ThenStmt = CompoundStmt::Create(Context, {CS->getCapturedStmt()},
+                                      SourceLocation(), SourceLocation());
+
+    IfStmt =
+        ActOnIfStmt(SourceLocation(), false, NULL,
+                    ActOnCondition(getCurScope(), SourceLocation(),
+                                   WhenCondExpr, Sema::ConditionKind::Boolean),
+                    ThenStmt, SourceLocation(), ElseStmt);
+    ElseStmt = IfStmt.get();
+  }
   return OMPMetadirectiveDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt, IfStmt.get());
 }
 
