@@ -2283,6 +2283,10 @@ void OMPClauseEnqueue::VisitOMPDynamicAllocatorsClause(
 void OMPClauseEnqueue::VisitOMPAtomicDefaultMemOrderClause(
     const OMPAtomicDefaultMemOrderClause *) {}
 
+void OMPClauseEnqueue::VisitOMPWhenClause(const OMPWhenClause *C) {
+  Visitor->AddStmt(C->getDirectiveVariant());
+}
+
 void OMPClauseEnqueue::VisitOMPDeviceClause(const OMPDeviceClause *C) {
   Visitor->AddStmt(C->getDevice());
 }
@@ -5648,6 +5652,8 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("attribute(warn_unused_result)");
   case CXCursor_AlignedAttr:
     return cxstring::createRef("attribute(aligned)");
+  case CXCursor_OMPMetadirectiveDirective:
+    return cxstring::createRef("OMPMetaDirective");
   }
 
   llvm_unreachable("Unhandled CXCursorKind");

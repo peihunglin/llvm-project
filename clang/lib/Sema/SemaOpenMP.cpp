@@ -36,6 +36,7 @@
 #include "llvm/ADT/PointerEmbeddedInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
+#include "llvm/Frontend/OpenMP/OMPContext.h"
 #include <set>
 
 using namespace clang;
@@ -5434,6 +5435,12 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     if (LangOpts.OpenMP >= 50)
       AllowedNameModifiers.push_back(OMPD_simd);
     break;
+  case OMPD_metadirective:
+    llvm::errs() <<"metadirective is caught\n";
+    Res = ActOnOpenMPMetadirectiveDirective(ClausesWithImplicit, AStmt, StartLoc, EndLoc);
+    if (LangOpts.OpenMP >= 50)
+      AllowedNameModifiers.push_back(OMPD_metadirective);
+    break;
   case OMPD_declare_target:
   case OMPD_end_declare_target:
   case OMPD_threadprivate:
@@ -9574,6 +9581,110 @@ StmtResult Sema::ActOnOpenMPOrderedDirective(ArrayRef<OMPClause *> Clauses,
   return OMPOrderedDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt);
 }
 
+StmtResult Sema::ActOnOpenMPMetadirectiveDirective(ArrayRef<OMPClause *> Clauses,
+                                          Stmt *AStmt,
+                                          SourceLocation StartLoc,
+                                          SourceLocation EndLoc) {
+  if (!AStmt)
+    return StmtError();
+
+  auto *CS = cast<CapturedStmt>(AStmt);
+  CS->getCapturedDecl()->setNothrow();
+
+  StmtResult IfStmt = StmtError();
+  Stmt *ElseStmt = nullptr;
+  for (auto i = Clauses.rbegin(); i < Clauses.rend(); i++) {
+    OMPWhenClause *WhenClause = dyn_cast<OMPWhenClause>(*i);
+    Expr *WhenCondExpr = nullptr;
+    Stmt *ThenStmt = nullptr;
+
+    OpenMPDirectiveKind DKind = WhenClause->getDKind();
+
+    if (DKind != OMPD_unknown)
+      ThenStmt = CompoundStmt::Create(Context, {WhenClause->getDirectiveVariant()},
+                                      SourceLocation(), SourceLocation());
+
+    for (const OMPTraitSet &Set : WhenClause->getTI().Sets) {
+      for (const OMPTraitSelector &Selector : Set.Selectors) {
+        switch (Selector.Kind) {
+          case TraitSelector::user_condition: {
+          assert(Selector.ScoreOrCondition &&
+                 "Ill-formed user condition, expected condition expression!");
+
+          WhenCondExpr = Selector.ScoreOrCondition;
+          break;
+        }
+        case TraitSelector::device_arch: {
+          bool archMatch = false;
+          for (const OMPTraitProperty &Property : Selector.Properties) {
+            for (const auto &T : getLangOpts().OMPTargetTriples) {
+              if (T.getArchName() == getOpenMPContextTraitPropertyName(Property.Kind,"")) {
+                archMatch = true;
+                break;
+              }
+            }
+            if (archMatch)
+              break;
+          }
+          // Create a true/false boolean expression and assign to WhenCondExpr
+          auto *C = new (Context)
+              CXXBoolLiteralExpr(archMatch, Context.BoolTy, StartLoc);
+          WhenCondExpr = dyn_cast<Expr>(C);
+          break;
+        }
+        case TraitSelector::implementation_vendor: {
+          bool vendorMatch = false;
+          for (const OMPTraitProperty &Property : Selector.Properties) {
+            for (auto &T : getLangOpts().OMPTargetTriples) {
+              if (T.getVendorName() == getOpenMPContextTraitPropertyName(Property.Kind,"")) {
+                vendorMatch = true;
+                break;
+              }
+            }
+            if (vendorMatch)
+              break;
+          }
+          // Create a true/false boolean expression and assign to WhenCondExpr
+          auto *C = new (Context)
+              CXXBoolLiteralExpr(vendorMatch, Context.BoolTy, StartLoc);
+          WhenCondExpr = dyn_cast<Expr>(C);
+          break;
+        }
+        case TraitSelector::device_isa:
+        case TraitSelector::device_kind:
+        case TraitSelector::implementation_extension:
+        default:
+          break;
+        }
+      }
+    }
+    if (WhenCondExpr == NULL) {
+      if (ElseStmt != NULL) {
+        Diag(WhenClause->getBeginLoc(), diag::err_omp_misplaced_default_clause);
+        return StmtError();
+      }
+      if (DKind == OMPD_unknown)
+        ElseStmt = CompoundStmt::Create(Context, {CS->getCapturedStmt()},
+                                        SourceLocation(), SourceLocation());
+      else
+        ElseStmt = ThenStmt;
+      continue;
+    }
+
+    if (ThenStmt == NULL)
+      ThenStmt = CompoundStmt::Create(Context, {CS->getCapturedStmt()},
+                                      SourceLocation(), SourceLocation());
+
+    IfStmt =
+        ActOnIfStmt(SourceLocation(), false, SourceLocation(), NULL,
+                    ActOnCondition(getCurScope(), SourceLocation(),
+                                   WhenCondExpr, Sema::ConditionKind::Boolean),
+                    SourceLocation(), ThenStmt, SourceLocation(), ElseStmt);
+    ElseStmt = IfStmt.get();
+  }
+  return OMPMetadirectiveDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt, IfStmt.get());
+}
+
 namespace {
 /// Helper class for checking expression in 'omp atomic [update]'
 /// construct.
@@ -13646,6 +13757,12 @@ OMPClause *Sema::ActOnOpenMPDynamicAllocatorsClause(SourceLocation StartLoc,
 OMPClause *Sema::ActOnOpenMPDestroyClause(SourceLocation StartLoc,
                                           SourceLocation EndLoc) {
   return new (Context) OMPDestroyClause(StartLoc, EndLoc);
+}
+
+OMPClause *Sema::ActOnOpenMPWhenClause(OMPTraitInfo &TI, OpenMPDirectiveKind dKind,
+                                       Stmt *dvariant, SourceLocation StartLoc,
+                                       SourceLocation LParenLoc, SourceLocation EndLoc) {
+  return new (Context) OMPWhenClause(TI, dKind, dvariant, StartLoc, LParenLoc, EndLoc);
 }
 
 OMPClause *Sema::ActOnOpenMPVarListClause(

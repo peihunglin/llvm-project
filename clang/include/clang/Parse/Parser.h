@@ -3223,6 +3223,21 @@ private:
   OMPClause *ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
                                       OpenMPClauseKind Kind, bool ParseOnly);
 
+  /// Parsing of OpenMP metadirective clauses.
+  ///
+  ///    when-clause:
+  ///      'when' '('  (context-selector-specification ':' [ directive-variant ] ')'
+  ///    defaault-clause:
+  ///      'default' '(' directive-variant ')'
+  ///
+  OMPClause *ParseOpenMPMetadirectiveClause(OpenMPDirectiveKind DKind,
+                                     OpenMPClauseKind CKind);
+
+  /// Parse OpenMP directive variant:
+  ///
+  /// <directive-name> [clause [,] [clause]..]
+  StmtResult parseOMPDirectiveVariant(Parser &p, ParsedStmtContext StmtCtx);
+
   /// Parses and creates OpenMP 5.0 iterators expression:
   /// <iterators> = 'iterator' '(' { [ <iterator-type> ] identifier =
   /// <range-specification> }+ ')'

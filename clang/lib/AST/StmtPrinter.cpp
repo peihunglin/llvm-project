@@ -644,10 +644,22 @@ void StmtPrinter::PrintOMPExecutableDirective(OMPExecutableDirective *S,
     if (Clause && !Clause->isImplicit()) {
       OS << ' ';
       Printer.Visit(Clause);
+      if (auto *metadirectiveDir = dyn_cast<OMPMetadirectiveDirective>(S)) {
+        if (OMPWhenClause *c = dyn_cast<OMPWhenClause>(Clause)) {
+          if (c->getDKind() != llvm::omp::OMPD_unknown)
+            OS << getOpenMPDirectiveName(c->getDKind());
+          OS << ")";
+        }
+      }
     }
   OS << NL;
   if (!ForceNoStmt && S->hasAssociatedStmt())
     PrintStmt(S->getRawStmt());
+}
+
+void StmtPrinter::VisitOMPMetadirectiveDirective(OMPMetadirectiveDirective *Node) {
+  Indent() << "#pragma omp metadirective";
+  PrintOMPExecutableDirective(Node);
 }
 
 void StmtPrinter::VisitOMPParallelDirective(OMPParallelDirective *Node) {

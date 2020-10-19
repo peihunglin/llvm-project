@@ -3510,6 +3510,7 @@ public:
 
   /// Emits the lvalue for the expression with possibly captured variable.
   LValue EmitOMPSharedLValue(const Expr *E);
+  void EmitOMPMetadirectiveDirective(const OMPMetadirectiveDirective &S);
 
 private:
   /// Helpers for blocks.

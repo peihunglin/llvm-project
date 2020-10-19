@@ -281,6 +281,10 @@ def OMPC_ThreadPrivate : Clause<"threadprivate"> {
   let alternativeName = "threadprivate or thread local";
   let isImplicit = 1;
 }
+def OMPC_When : Clause<"when"> {
+  let clangClass = "OMPWhenClause";
+}
+
 def OMPC_Unknown : Clause<"unknown"> {
   let isImplicit = 1;
   let isDefault = 1;
@@ -1562,6 +1566,16 @@ def OMP_Scan : Directive<"scan"> {
 }
 def OMP_BeginDeclareVariant : Directive<"begin declare variant"> {}
 def OMP_EndDeclareVariant : Directive<"end declare variant"> {}
+def OMP_Metadirective : Directive<"metadirective"> {
+  let allowedClauses = [
+    VersionedClause<OMPC_When>
+  ];
+let allowedOnceClauses = [
+    VersionedClause<OMPC_Default>
+  ];
+}
+def OMP_BeginMetadirective : Directive<"begin metadirective"> {}
+def OMP_EndMetadirective : Directive<"end metadirective"> {}
 def OMP_ParallelWorkshare : Directive<"parallel workshare"> {
   let allowedClauses = [
     VersionedClause<OMPC_Allocate>,

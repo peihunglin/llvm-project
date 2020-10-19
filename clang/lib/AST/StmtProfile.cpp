@@ -538,6 +538,11 @@ void OMPClauseProfiler::VisitOMPNogroupClause(const OMPNogroupClause *) {}
 
 void OMPClauseProfiler::VisitOMPDestroyClause(const OMPDestroyClause *) {}
 
+void OMPClauseProfiler::VisitOMPWhenClause(const OMPWhenClause *C) {
+  if (C->getDirectiveVariant())
+    Profiler->VisitStmt(C->getDirectiveVariant());
+}
+
 template<typename T>
 void OMPClauseProfiler::VisitOMPClauseList(T *Node) {
   for (auto *E : Node->varlists()) {
@@ -1107,6 +1112,10 @@ void StmtProfiler::VisitOMPTargetTeamsDistributeParallelForSimdDirective(
 void StmtProfiler::VisitOMPTargetTeamsDistributeSimdDirective(
     const OMPTargetTeamsDistributeSimdDirective *S) {
   VisitOMPLoopDirective(S);
+}
+
+void StmtProfiler::VisitOMPMetadirectiveDirective(const OMPMetadirectiveDirective *S) {
+  VisitOMPExecutableDirective(S);
 }
 
 void StmtProfiler::VisitExpr(const Expr *S) {

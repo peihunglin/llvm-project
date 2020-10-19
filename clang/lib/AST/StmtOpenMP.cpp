@@ -1880,3 +1880,24 @@ OMPTargetTeamsDistributeSimdDirective::CreateEmpty(const ASTContext &C,
       numLoopChildren(CollapsedNum, OMPD_target_teams_distribute_simd),
       CollapsedNum);
 }
+
+OMPMetadirectiveDirective *OMPMetadirectiveDirective::Create(const ASTContext &C,
+                                           SourceLocation StartLoc,
+                                           SourceLocation EndLoc,
+                                           ArrayRef<OMPClause *> Clauses,
+                                           Stmt *AssociatedStmt, Stmt *IfStmt) {
+  unsigned Size = llvm::alignTo(sizeof(OMPMetadirectiveDirective), alignof(OMPClause *));
+  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * Clauses.size() + sizeof(Stmt *));
+  auto *Dir = new (Mem) OMPMetadirectiveDirective(StartLoc, EndLoc, Clauses.size());
+  Dir->setIfStmt(IfStmt);
+  return Dir;
+}
+
+OMPMetadirectiveDirective *OMPMetadirectiveDirective::CreateEmpty(const ASTContext &C,
+                                                unsigned NumClauses,
+                                                EmptyShell) {
+  unsigned Size = llvm::alignTo(sizeof(OMPMetadirectiveDirective), alignof(OMPClause *));
+  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * NumClauses + sizeof(Stmt));
+  return new (Mem) OMPMetadirectiveDirective(NumClauses);
+}
+

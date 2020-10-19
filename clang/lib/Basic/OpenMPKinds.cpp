@@ -180,6 +180,7 @@ unsigned clang::getOpenMPSimpleClauseType(OpenMPClauseKind Kind, StringRef Str,
   case OMPC_exclusive:
   case OMPC_uses_allocators:
   case OMPC_affinity:
+  case OMPC_when:
     break;
   default:
     break;
@@ -420,6 +421,7 @@ const char *clang::getOpenMPSimpleClauseTypeName(OpenMPClauseKind Kind,
   case OMPC_exclusive:
   case OMPC_uses_allocators:
   case OMPC_affinity:
+  case OMPC_when:
     break;
   default:
     break;
@@ -640,6 +642,9 @@ void clang::getOpenMPCaptureRegions(
     CaptureRegions.push_back(OMPD_teams);
     CaptureRegions.push_back(OMPD_parallel);
     break;
+  case OMPD_metadirective:
+    CaptureRegions.push_back(OMPD_metadirective);
+    break;  
   case OMPD_simd:
   case OMPD_for:
   case OMPD_for_simd:
@@ -675,6 +680,8 @@ void clang::getOpenMPCaptureRegions(
   case OMPD_declare_variant:
   case OMPD_begin_declare_variant:
   case OMPD_end_declare_variant:
+  case OMPD_begin_metadirective:
+  case OMPD_end_metadirective:
     llvm_unreachable("OpenMP Directive is not allowed");
   case OMPD_unknown:
   default:

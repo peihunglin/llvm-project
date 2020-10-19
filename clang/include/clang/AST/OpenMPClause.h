@@ -7879,6 +7879,76 @@ public:
 llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const OMPTraitInfo &TI);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const OMPTraitInfo *TI);
 
+/// This represents clause 'when' in the '#pragma omp metadirective' directive.
+///
+/// \code
+/// #pragma omp metadirective when()
+/// \endcode
+/// In this example directive '#pragma omp metadirective' has clause 'when'
+class OMPWhenClause final : public OMPClause {
+
+  friend class OMPClauseReader;
+
+  OMPTraitInfo *TI;
+
+  OpenMPDirectiveKind DKind;
+
+  Stmt *DirectiveVariant;
+
+  /// Location of '('.
+  SourceLocation LParenLoc;
+
+  /// Location of ':' (if any).
+  SourceLocation ColonLoc;
+
+public:
+  OMPWhenClause(OMPTraitInfo &T, OpenMPDirectiveKind dKind,
+                Stmt *dvariant, SourceLocation StartLoc,
+                SourceLocation LParenLoc, SourceLocation EndLoc)
+      : OMPClause(llvm::omp::OMPC_when, StartLoc, EndLoc), TI(&T), DKind(dKind),
+        DirectiveVariant(dvariant), LParenLoc(LParenLoc) {}
+
+  OMPWhenClause(SourceLocation StartLoc, SourceLocation EndLoc)
+      : OMPClause(llvm::omp::OMPC_when, StartLoc, EndLoc) {}
+
+  OMPWhenClause()
+    : OMPClause(llvm::omp::OMPC_when, SourceLocation(), SourceLocation()) {}
+
+ /// Sets the location of '('.
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+
+  /// Returns the location of '('.
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+
+  Stmt *getDirectiveVariant() const { return DirectiveVariant; }
+
+  /// Returns the OMPTraitInfo
+  OMPTraitInfo &getTI() { return *TI; }
+
+  /// Set the inner statement
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+  child_range used_children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+  const_child_range used_children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const OMPClause *T) {
+    return T->getClauseKind() == llvm::omp::OMPC_when;
+  }
+
+  /// Returns the directive variant kind
+  OpenMPDirectiveKind getDKind() { return DKind; }
+
+};
+
 /// Clang specific specialization of the OMPContext to lookup target features.
 struct TargetOMPContext final : public llvm::omp::OMPContext {
 

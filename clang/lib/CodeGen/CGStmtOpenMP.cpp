@@ -5392,6 +5392,7 @@ static void emitOMPAtomicExpr(CodeGenFunction &CGF, OpenMPClauseKind Kind,
   case OMPC_exclusive:
   case OMPC_uses_allocators:
   case OMPC_affinity:
+  case OMPC_when:
   default:
     llvm_unreachable("Clause is not allowed in 'omp atomic'.");
   }
@@ -6722,3 +6723,8 @@ void CodeGenFunction::EmitSimpleOMPExecutableDirective(
   // Check for outer lastprivate conditional update.
   checkForLastprivateConditionalUpdate(*this, D);
 }
+
+void CodeGenFunction::EmitOMPMetadirectiveDirective(const OMPMetadirectiveDirective &S) {
+  EmitStmt(S.getIfStmt());
+}
+
