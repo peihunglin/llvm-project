@@ -75,6 +75,8 @@ bool getDontPlaceZerosInBSS();
 
 bool getEnableGuaranteedTailCallOpt();
 
+bool getEnableAIXExtendedAltivecABI();
+
 bool getDisableTailCalls();
 
 bool getStackSymbolOrdering();
@@ -98,6 +100,10 @@ Optional<bool> getExplicitFunctionSections();
 bool getIgnoreXCOFFVisibility();
 
 std::string getBBSections();
+
+std::string getStackProtectorGuard();
+unsigned getStackProtectorGuardOffset();
+std::string getStackProtectorGuardReg();
 
 unsigned getTLSSize();
 
@@ -134,6 +140,9 @@ struct RegisterCodeGenFlags {
 };
 
 llvm::BasicBlockSection getBBSectionsMode(llvm::TargetOptions &Options);
+
+llvm::StackProtectorGuards
+getStackProtectorGuardMode(llvm::TargetOptions &Options);
 
 /// Common utility function tightly tied to the options listed here. Initializes
 /// a TargetOptions object with CodeGen flags and returns it.

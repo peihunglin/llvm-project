@@ -697,7 +697,7 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   //   If T is cv std::nullptr_t, the result is a null pointer constant.
   CastKind CK = T->isNullPtrType() ? CK_NullToPointer : CK_LValueToRValue;
   Res = ImplicitCastExpr::Create(Context, T, CK, E, nullptr, VK_RValue,
-                                 FPOptionsOverride());
+                                 CurFPFeatureOverrides());
 
   // C11 6.3.2.1p2:
   //   ... if the lvalue has atomic type, the value has the non-atomic version
@@ -1758,7 +1758,7 @@ static ExprResult BuildCookedLiteralOperatorCall(Sema &S, Scope *Scope,
   LookupResult R(S, OpName, UDSuffixLoc, Sema::LookupOrdinaryName);
   if (S.LookupLiteralOperator(Scope, R, llvm::makeArrayRef(ArgTy, Args.size()),
                               /*AllowRaw*/ false, /*AllowTemplate*/ false,
-                              /*AllowStringTemplate*/ false,
+                              /*AllowStringTemplatePack*/ false,
                               /*DiagnoseMissing*/ true) == Sema::LOLR_Error)
     return ExprError();
 
@@ -1863,9 +1863,9 @@ Sema::ActOnStringLiteral(ArrayRef<Token> StringToks, Scope *UDLScope) {
 
   LookupResult R(*this, OpName, UDSuffixLoc, LookupOrdinaryName);
   switch (LookupLiteralOperator(UDLScope, R, ArgTy,
-                                /*AllowRaw*/ false, /*AllowTemplate*/ false,
-                                /*AllowStringTemplate*/ true,
-                                /*DiagnoseMissing*/ true)) {
+                                /*AllowRaw*/ false, /*AllowTemplate*/ true,
+                                /*AllowStringTemplatePack*/ true,
+                                /*DiagnoseMissing*/ true, Lit)) {
 
   case LOLR_Cooked: {
     llvm::APInt Len(Context.getIntWidth(SizeType), Literal.GetNumStringChars());
@@ -1876,7 +1876,16 @@ Sema::ActOnStringLiteral(ArrayRef<Token> StringToks, Scope *UDLScope) {
     return BuildLiteralOperatorCall(R, OpNameInfo, Args, StringTokLocs.back());
   }
 
-  case LOLR_StringTemplate: {
+  case LOLR_Template: {
+    TemplateArgumentListInfo ExplicitArgs;
+    TemplateArgument Arg(Lit);
+    TemplateArgumentLocInfo ArgInfo(Lit);
+    ExplicitArgs.addArgument(TemplateArgumentLoc(Arg, ArgInfo));
+    return BuildLiteralOperatorCall(R, OpNameInfo, None, StringTokLocs.back(),
+                                    &ExplicitArgs);
+  }
+
+  case LOLR_StringTemplatePack: {
     TemplateArgumentListInfo ExplicitArgs;
 
     unsigned CharBits = Context.getIntWidth(CharTy);
@@ -1897,7 +1906,6 @@ Sema::ActOnStringLiteral(ArrayRef<Token> StringToks, Scope *UDLScope) {
                                     &ExplicitArgs);
   }
   case LOLR_Raw:
-  case LOLR_Template:
   case LOLR_ErrorNoDiagnostic:
     llvm_unreachable("unexpected literal operator lookup result");
   case LOLR_Error:
@@ -2810,21 +2818,24 @@ Sema::LookupInObjCMethod(LookupResult &Lookup, Scope *S,
 
 /// Cast a base object to a member's actual type.
 ///
-/// Logically this happens in three phases:
+/// There are two relevant checks:
 ///
-/// * First we cast from the base type to the naming class.
-///   The naming class is the class into which we were looking
-///   when we found the member;  it's the qualifier type if a
-///   qualifier was provided, and otherwise it's the base type.
+/// C++ [class.access.base]p7:
 ///
-/// * Next we cast from the naming class to the declaring class.
-///   If the member we found was brought into a class's scope by
-///   a using declaration, this is that class;  otherwise it's
-///   the class declaring the member.
+///   If a class member access operator [...] is used to access a non-static
+///   data member or non-static member function, the reference is ill-formed if
+///   the left operand [...] cannot be implicitly converted to a pointer to the
+///   naming class of the right operand.
 ///
-/// * Finally we cast from the declaring class to the "true"
-///   declaring class of the member.  This conversion does not
-///   obey access control.
+/// C++ [expr.ref]p7:
+///
+///   If E2 is a non-static data member or a non-static member function, the
+///   program is ill-formed if the class of which E2 is directly a member is an
+///   ambiguous base (11.8) of the naming class (11.9.3) of E2.
+///
+/// Note that the latter check does not consider access; the access of the
+/// "real" base class is checked as appropriate when checking the access of the
+/// member name.
 ExprResult
 Sema::PerformObjectMemberConversion(Expr *From,
                                     NestedNameSpecifier *Qualifier,
@@ -2948,45 +2959,10 @@ Sema::PerformObjectMemberConversion(Expr *From,
     }
   }
 
-  bool IgnoreAccess = false;
-
-  // If we actually found the member through a using declaration, cast
-  // down to the using declaration's type.
-  //
-  // Pointer equality is fine here because only one declaration of a
-  // class ever has member declarations.
-  if (FoundDecl->getDeclContext() != Member->getDeclContext()) {
-    assert(isa<UsingShadowDecl>(FoundDecl));
-    QualType URecordType = Context.getTypeDeclType(
-                           cast<CXXRecordDecl>(FoundDecl->getDeclContext()));
-
-    // We only need to do this if the naming-class to declaring-class
-    // conversion is non-trivial.
-    if (!Context.hasSameUnqualifiedType(FromRecordType, URecordType)) {
-      assert(IsDerivedFrom(FromLoc, FromRecordType, URecordType));
-      CXXCastPath BasePath;
-      if (CheckDerivedToBaseConversion(FromRecordType, URecordType,
-                                       FromLoc, FromRange, &BasePath))
-        return ExprError();
-
-      QualType UType = URecordType;
-      if (PointerConversions)
-        UType = Context.getPointerType(UType);
-      From = ImpCastExprToType(From, UType, CK_UncheckedDerivedToBase,
-                               VK, &BasePath).get();
-      FromType = UType;
-      FromRecordType = URecordType;
-    }
-
-    // We don't do access control for the conversion from the
-    // declaring class to the true declaring class.
-    IgnoreAccess = true;
-  }
-
   CXXCastPath BasePath;
   if (CheckDerivedToBaseConversion(FromRecordType, DestRecordType,
                                    FromLoc, FromRange, &BasePath,
-                                   IgnoreAccess))
+                                   /*IgnoreAccess=*/true))
     return ExprError();
 
   return ImpCastExprToType(From, DestType, CK_UncheckedDerivedToBase,
@@ -3226,6 +3202,17 @@ ExprResult Sema::BuildDeclarationNameExpr(
         break;
       }
 
+      // [expr.prim.id.unqual]p2:
+      //   If the entity is a template parameter object for a template
+      //   parameter of type T, the type of the expression is const T.
+      //   [...] The expression is an lvalue if the entity is a [...] template
+      //   parameter object.
+      if (type->isRecordType()) {
+        type = type.getUnqualifiedType().withConst();
+        valueKind = VK_LValue;
+        break;
+      }
+
       // For non-references, we need to strip qualifiers just in case
       // the template parameter was declared as 'const int' or whatever.
       valueKind = VK_RValue;
@@ -3325,8 +3312,9 @@ ExprResult Sema::BuildDeclarationNameExpr(
 
     case Decl::MSProperty:
     case Decl::MSGuid:
-      // FIXME: Should MSGuidDecl be subject to capture in OpenMP,
-      // or duplicated between host and device?
+    case Decl::TemplateParamObject:
+      // FIXME: Should MSGuidDecl and template parameter objects be subject to
+      // capture in OpenMP, or duplicated between host and device?
       valueKind = VK_LValue;
       break;
 
@@ -3629,7 +3617,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
     LookupResult R(*this, OpName, UDSuffixLoc, LookupOrdinaryName);
     switch (LookupLiteralOperator(UDLScope, R, CookedTy,
                                   /*AllowRaw*/ true, /*AllowTemplate*/ true,
-                                  /*AllowStringTemplate*/ false,
+                                  /*AllowStringTemplatePack*/ false,
                                   /*DiagnoseMissing*/ !Literal.isImaginary)) {
     case LOLR_ErrorNoDiagnostic:
       // Lookup failure for imaginary constants isn't fatal, there's still the
@@ -3684,7 +3672,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
       return BuildLiteralOperatorCall(R, OpNameInfo, None, TokLoc,
                                       &ExplicitArgs);
     }
-    case LOLR_StringTemplate:
+    case LOLR_StringTemplatePack:
       llvm_unreachable("unexpected literal operator lookup result");
     }
   }
@@ -3758,8 +3746,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
 
     if (Ty == Context.DoubleTy) {
       if (getLangOpts().SinglePrecisionConstants) {
-        const BuiltinType *BTy = Ty->getAs<BuiltinType>();
-        if (BTy->getKind() != BuiltinType::Float) {
+        if (Ty->castAs<BuiltinType>()->getKind() != BuiltinType::Float) {
           Res = ImpCastExprToType(Res, Context.FloatTy, CK_FloatingCast).get();
         }
       } else if (getLangOpts().OpenCL &&
@@ -4731,6 +4718,9 @@ void Sema::CheckAddressOfNoDeref(const Expr *E) {
 }
 
 void Sema::CheckSubscriptAccessOfNoDeref(const ArraySubscriptExpr *E) {
+  if (isUnevaluatedContext())
+    return;
+
   QualType ResultTy = E->getType();
   ExpressionEvaluationContextRecord &LastRecord = ExprEvalContexts.back();
 
@@ -5970,6 +5960,9 @@ static bool isPlaceholderToRemoveAsArg(QualType type) {
 #define SVE_TYPE(Name, Id, SingletonId) \
   case BuiltinType::Id:
 #include "clang/Basic/AArch64SVEACLETypes.def"
+#define PPC_MMA_VECTOR_TYPE(Name, Id, Size) \
+  case BuiltinType::Id:
+#include "clang/Basic/PPCTypes.def"
 #define PLACEHOLDER_TYPE(ID, SINGLETON_ID)
 #define BUILTIN_TYPE(ID, SINGLETON_ID) case BuiltinType::ID:
 #include "clang/AST/BuiltinTypes.def"
@@ -7172,6 +7165,28 @@ static bool breakDownVectorType(QualType type, uint64_t &len,
   len = 1;
   eltType = type;
   return true;
+}
+
+/// Are the two types SVE-bitcast-compatible types? I.e. is bitcasting from the
+/// first SVE type (e.g. an SVE VLAT) to the second type (e.g. an SVE VLST)
+/// allowed?
+///
+/// This will also return false if the two given types do not make sense from
+/// the perspective of SVE bitcasts.
+bool Sema::isValidSveBitcast(QualType srcTy, QualType destTy) {
+  assert(srcTy->isVectorType() || destTy->isVectorType());
+
+  auto ValidScalableConversion = [](QualType FirstType, QualType SecondType) {
+    if (!FirstType->isSizelessBuiltinType())
+      return false;
+
+    const auto *VecTy = SecondType->getAs<VectorType>();
+    return VecTy &&
+           VecTy->getVectorKind() == VectorType::SveFixedLengthDataVector;
+  };
+
+  return ValidScalableConversion(srcTy, destTy) ||
+         ValidScalableConversion(destTy, srcTy);
 }
 
 /// Are the two types lax-compatible vector types?  That is, given
@@ -8980,12 +8995,13 @@ Sema::CheckAssignmentConstraints(QualType LHSType, ExprResult &RHS,
     }
 
     // Allow assignments between fixed-length and sizeless SVE vectors.
-    if (((LHSType->isSizelessBuiltinType() && RHSType->isVectorType()) ||
-         (LHSType->isVectorType() && RHSType->isSizelessBuiltinType())) &&
-        Context.areCompatibleSveTypes(LHSType, RHSType)) {
-      Kind = CK_BitCast;
-      return Compatible;
-    }
+    if ((LHSType->isSizelessBuiltinType() && RHSType->isVectorType()) ||
+        (LHSType->isVectorType() && RHSType->isSizelessBuiltinType()))
+      if (Context.areCompatibleSveTypes(LHSType, RHSType) ||
+          Context.areLaxCompatibleSveTypes(LHSType, RHSType)) {
+        Kind = CK_BitCast;
+        return Compatible;
+      }
 
     return Incompatible;
   }
@@ -9821,6 +9837,44 @@ QualType Sema::CheckVectorOperands(ExprResult &LHS, ExprResult &RHS,
     }
   }
 
+  // Expressions containing fixed-length and sizeless SVE vectors are invalid
+  // since the ambiguity can affect the ABI.
+  auto IsSveConversion = [](QualType FirstType, QualType SecondType) {
+    const VectorType *VecType = SecondType->getAs<VectorType>();
+    return FirstType->isSizelessBuiltinType() && VecType &&
+           (VecType->getVectorKind() == VectorType::SveFixedLengthDataVector ||
+            VecType->getVectorKind() ==
+                VectorType::SveFixedLengthPredicateVector);
+  };
+
+  if (IsSveConversion(LHSType, RHSType) || IsSveConversion(RHSType, LHSType)) {
+    Diag(Loc, diag::err_typecheck_sve_ambiguous) << LHSType << RHSType;
+    return QualType();
+  }
+
+  // Expressions containing GNU and SVE (fixed or sizeless) vectors are invalid
+  // since the ambiguity can affect the ABI.
+  auto IsSveGnuConversion = [](QualType FirstType, QualType SecondType) {
+    const VectorType *FirstVecType = FirstType->getAs<VectorType>();
+    const VectorType *SecondVecType = SecondType->getAs<VectorType>();
+
+    if (FirstVecType && SecondVecType)
+      return FirstVecType->getVectorKind() == VectorType::GenericVector &&
+             (SecondVecType->getVectorKind() ==
+                  VectorType::SveFixedLengthDataVector ||
+              SecondVecType->getVectorKind() ==
+                  VectorType::SveFixedLengthPredicateVector);
+
+    return FirstType->isSizelessBuiltinType() && SecondVecType &&
+           SecondVecType->getVectorKind() == VectorType::GenericVector;
+  };
+
+  if (IsSveGnuConversion(LHSType, RHSType) ||
+      IsSveGnuConversion(RHSType, LHSType)) {
+    Diag(Loc, diag::err_typecheck_sve_gnu_ambiguous) << LHSType << RHSType;
+    return QualType();
+  }
+
   // If there's a vector type and a scalar, try to convert the scalar to
   // the vector element type and splat.
   unsigned DiagID = diag::err_typecheck_vector_not_convertable;
@@ -9876,22 +9930,6 @@ QualType Sema::CheckVectorOperands(ExprResult &LHS, ExprResult &RHS,
   }
 
   // Okay, the expression is invalid.
-
-  // Returns true if the operands are SVE VLA and VLS types.
-  auto IsSveConversion = [](QualType FirstType, QualType SecondType) {
-    const VectorType *VecType = SecondType->getAs<VectorType>();
-    return FirstType->isSizelessBuiltinType() && VecType &&
-           (VecType->getVectorKind() == VectorType::SveFixedLengthDataVector ||
-            VecType->getVectorKind() ==
-                VectorType::SveFixedLengthPredicateVector);
-  };
-
-  // If there's a sizeless and fixed-length operand, diagnose that.
-  if (IsSveConversion(LHSType, RHSType) || IsSveConversion(RHSType, LHSType)) {
-    Diag(Loc, diag::err_typecheck_vector_not_convertable_sizeless)
-        << LHSType << RHSType;
-    return QualType();
-  }
 
   // If there's a non-vector, non-real operand, diagnose that.
   if ((!RHSVecType && !RHSType->isRealType()) ||
@@ -14598,7 +14636,8 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
                             OpLoc, CanOverflow, CurFPFeatureOverrides());
 
   if (Opc == UO_Deref && UO->getType()->hasAttr(attr::NoDeref) &&
-      !isa<ArrayType>(UO->getType().getDesugaredType(Context)))
+      !isa<ArrayType>(UO->getType().getDesugaredType(Context)) &&
+      !isUnevaluatedContext())
     ExprEvalContexts.back().PossibleDerefs.insert(UO);
 
   // Convert the result back to a half vector.
@@ -15046,7 +15085,7 @@ void Sema::ActOnBlockArguments(SourceLocation CaretLoc, Declarator &ParamInfo,
                                Scope *CurScope) {
   assert(ParamInfo.getIdentifier() == nullptr &&
          "block-id should have no identifier!");
-  assert(ParamInfo.getContext() == DeclaratorContext::BlockLiteralContext);
+  assert(ParamInfo.getContext() == DeclaratorContext::BlockLiteral);
   BlockScopeInfo *CurBlock = getCurBlock();
 
   TypeSourceInfo *Sig = GetTypeForDeclarator(ParamInfo, CurScope);
@@ -15094,10 +15133,10 @@ void Sema::ActOnBlockArguments(SourceLocation CaretLoc, Declarator &ParamInfo,
   CurBlock->TheDecl->setSignatureAsWritten(Sig);
   CurBlock->FunctionType = T;
 
-  const FunctionType *Fn = T->getAs<FunctionType>();
+  const auto *Fn = T->castAs<FunctionType>();
   QualType RetTy = Fn->getReturnType();
   bool isVariadic =
-    (isa<FunctionProtoType>(Fn) && cast<FunctionProtoType>(Fn)->isVariadic());
+      (isa<FunctionProtoType>(Fn) && cast<FunctionProtoType>(Fn)->isVariadic());
 
   CurBlock->TheDecl->setIsVariadic(isVariadic);
 
@@ -16212,8 +16251,8 @@ static void EvaluateAndDiagnoseImmediateInvocation(
   Expr::EvalResult Eval;
   Eval.Diag = &Notes;
   ConstantExpr *CE = Candidate.getPointer();
-  bool Result = CE->EvaluateAsConstantExpr(Eval, Expr::EvaluateForCodeGen,
-                                           SemaRef.getASTContext(), true);
+  bool Result = CE->EvaluateAsConstantExpr(
+      Eval, SemaRef.getASTContext(), ConstantExprKind::ImmediateInvocation);
   if (!Result || !Notes.empty()) {
     Expr *InnerExpr = CE->getSubExpr()->IgnoreImplicit();
     if (auto *FunctionalCast = dyn_cast<CXXFunctionalCastExpr>(InnerExpr))
@@ -16755,7 +16794,11 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func,
         bool FirstInstantiation = PointOfInstantiation.isInvalid();
         if (FirstInstantiation) {
           PointOfInstantiation = Loc;
-          Func->setTemplateSpecializationKind(TSK, PointOfInstantiation);
+          if (auto *MSI = Func->getMemberSpecializationInfo())
+            MSI->setPointOfInstantiation(Loc);
+            // FIXME: Notify listener.
+          else
+            Func->setTemplateSpecializationKind(TSK, PointOfInstantiation);
         } else if (TSK != TSK_ImplicitInstantiation) {
           // Use the point of use as the point of instantiation, instead of the
           // point of explicit instantiation (which we track as the actual point
@@ -17396,7 +17439,11 @@ bool Sema::tryCaptureVariable(
           if (IsTargetCap || IsOpenMPPrivateDecl == OMPC_private ||
               (IsGlobal && !IsGlobalCap)) {
             Nested = !IsTargetCap;
+            bool HasConst = DeclRefType.isConstQualified();
             DeclRefType = DeclRefType.getUnqualifiedType();
+            // Don't lose diagnostics about assignments to const.
+            if (HasConst)
+              DeclRefType.addConst();
             CaptureType = Context.getLValueReferenceType(DeclRefType);
             break;
           }
@@ -17995,6 +18042,7 @@ static void DoMarkVarDeclReferenced(Sema &SemaRef, SourceLocation Loc,
         PointOfInstantiation = Loc;
         if (MSI)
           MSI->setPointOfInstantiation(PointOfInstantiation);
+          // FIXME: Notify listener.
         else
           Var->setTemplateSpecializationKind(TSK, PointOfInstantiation);
       }
@@ -18923,7 +18971,7 @@ ExprResult RebuildUnknownAnyExpr::resolveDecl(Expr *E, ValueDecl *VD) {
             S.Context, FD->getDeclContext(), Loc, Loc,
             FD->getNameInfo().getName(), DestType, FD->getTypeSourceInfo(),
             SC_None, false /*isInlineSpecified*/, FD->hasPrototype(),
-            /*ConstexprKind*/ CSK_unspecified);
+            /*ConstexprKind*/ ConstexprSpecKind::Unspecified);
 
         if (FD->getQualifier())
           NewFD->setQualifierInfo(FD->getQualifierLoc());
@@ -19186,6 +19234,9 @@ ExprResult Sema::CheckPlaceholderExpr(Expr *E) {
 #define SVE_TYPE(Name, Id, SingletonId) \
   case BuiltinType::Id:
 #include "clang/Basic/AArch64SVEACLETypes.def"
+#define PPC_MMA_VECTOR_TYPE(Name, Id, Size) \
+  case BuiltinType::Id:
+#include "clang/Basic/PPCTypes.def"
 #define BUILTIN_TYPE(Id, SingletonId) case BuiltinType::Id:
 #define PLACEHOLDER_TYPE(Id, SingletonId)
 #include "clang/AST/BuiltinTypes.def"

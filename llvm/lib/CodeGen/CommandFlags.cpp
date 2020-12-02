@@ -58,6 +58,7 @@ CGOPT(bool, EnableNoInfsFPMath)
 CGOPT(bool, EnableNoNaNsFPMath)
 CGOPT(bool, EnableNoSignedZerosFPMath)
 CGOPT(bool, EnableNoTrappingFPMath)
+CGOPT(bool, EnableAIXExtendedAltivecABI)
 CGOPT(DenormalMode::DenormalModeKind, DenormalFPMath)
 CGOPT(DenormalMode::DenormalModeKind, DenormalFP32Math)
 CGOPT(bool, EnableHonorSignDependentRoundingFPMath)
@@ -76,6 +77,9 @@ CGOPT_EXP(bool, DataSections)
 CGOPT_EXP(bool, FunctionSections)
 CGOPT(bool, IgnoreXCOFFVisibility)
 CGOPT(std::string, BBSections)
+CGOPT(std::string, StackProtectorGuard)
+CGOPT(unsigned, StackProtectorGuardOffset)
+CGOPT(std::string, StackProtectorGuardReg)
 CGOPT(unsigned, TLSSize)
 CGOPT(bool, EmulatedTLS)
 CGOPT(bool, UniqueSectionNames)
@@ -279,6 +283,11 @@ codegen::RegisterCodeGenFlags::RegisterCodeGenFlags() {
       cl::init(false));
   CGBINDOPT(DontPlaceZerosInBSS);
 
+  static cl::opt<bool> EnableAIXExtendedAltivecABI(
+      "vec-extabi", cl::desc("Enable the AIX Extended Altivec ABI."),
+      cl::init(false));
+  CGBINDOPT(EnableAIXExtendedAltivecABI);
+
   static cl::opt<bool> EnableGuaranteedTailCallOpt(
       "tailcallopt",
       cl::desc(
@@ -347,6 +356,21 @@ codegen::RegisterCodeGenFlags::RegisterCodeGenFlags() {
       cl::value_desc("all | <function list (file)> | labels | none"),
       cl::init("none"));
   CGBINDOPT(BBSections);
+
+  static cl::opt<std::string> StackProtectorGuard(
+      "stack-protector-guard", cl::desc("Stack protector guard mode"),
+      cl::init("none"));
+  CGBINDOPT(StackProtectorGuard);
+
+  static cl::opt<std::string> StackProtectorGuardReg(
+      "stack-protector-guard-reg", cl::desc("Stack protector guard register"),
+      cl::init("none"));
+  CGBINDOPT(StackProtectorGuardReg);
+
+  static cl::opt<unsigned> StackProtectorGuardOffset(
+      "stack-protector-guard-offset", cl::desc("Stack protector guard offset"),
+      cl::init((unsigned)-1));
+  CGBINDOPT(StackProtectorGuardOffset);
 
   static cl::opt<unsigned> TLSSize(
       "tls-size", cl::desc("Bit size of immediate TLS offsets"), cl::init(0));
@@ -459,6 +483,24 @@ codegen::getBBSectionsMode(llvm::TargetOptions &Options) {
   }
 }
 
+llvm::StackProtectorGuards
+codegen::getStackProtectorGuardMode(llvm::TargetOptions &Options) {
+  if (getStackProtectorGuard() == "tls")
+    return StackProtectorGuards::TLS;
+  if (getStackProtectorGuard() == "global")
+    return StackProtectorGuards::Global;
+  if (getStackProtectorGuard() != "none") {
+    ErrorOr<std::unique_ptr<MemoryBuffer>> MBOrErr =
+        MemoryBuffer::getFile(getStackProtectorGuard());
+    if (!MBOrErr)
+      errs() << "error illegal stack protector guard mode: "
+             << MBOrErr.getError().message() << "\n";
+    else
+      Options.BBSectionsFuncListBuf = std::move(*MBOrErr);
+  }
+  return StackProtectorGuards::None;
+}
+
 // Common utility function tightly tied to the options listed here. Initializes
 // a TargetOptions object with CodeGen flags and returns it.
 TargetOptions
@@ -480,6 +522,7 @@ codegen::InitTargetOptionsFromCodeGenFlags(const Triple &TheTriple) {
       getEnableHonorSignDependentRoundingFPMath();
   if (getFloatABIForCalls() != FloatABI::Default)
     Options.FloatABIType = getFloatABIForCalls();
+  Options.EnableAIXExtendedAltivecABI = getEnableAIXExtendedAltivecABI();
   Options.NoZerosInBSS = getDontPlaceZerosInBSS();
   Options.GuaranteedTailCallOpt = getEnableGuaranteedTailCallOpt();
   Options.StackAlignmentOverride = getOverrideStackAlignment();
@@ -493,6 +536,9 @@ codegen::InitTargetOptionsFromCodeGenFlags(const Triple &TheTriple) {
   Options.BBSections = getBBSectionsMode(Options);
   Options.UniqueSectionNames = getUniqueSectionNames();
   Options.UniqueBasicBlockSectionNames = getUniqueBasicBlockSectionNames();
+  Options.StackProtectorGuard = getStackProtectorGuardMode(Options);
+  Options.StackProtectorGuardOffset = getStackProtectorGuardOffset();
+  Options.StackProtectorGuardReg = getStackProtectorGuardReg();
   Options.TLSSize = getTLSSize();
   Options.EmulatedTLS = getEmulatedTLS();
   Options.ExplicitEmulatedTLS = EmulatedTLSView->getNumOccurrences() > 0;

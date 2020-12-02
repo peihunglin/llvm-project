@@ -1,8 +1,24 @@
 include "llvm/Option/OptParser.td"
 
+// Flags that lld/MachO understands but ld64 doesn't. These take
+// '--' instead of '-' and use dashes instead of underscores, so
+// they don't collide with the ld64 compat options.
+
 def help : Flag<["-", "--"], "help">;
 def help_hidden : Flag<["--"], "help-hidden">,
   HelpText<"Display help for hidden options">;
+def color_diagnostics: Flag<["--"], "color-diagnostics">,
+  HelpText<"Alias for --color-diagnostics=always">;
+def no_color_diagnostics: Flag<["--"], "no-color-diagnostics">,
+  HelpText<"Alias for --color-diagnostics=never">;
+def color_diagnostics_eq: Joined<["--"], "color-diagnostics=">,
+  HelpText<"Use colors in diagnostics (default: auto)">,
+  MetaVarName<"[auto,always,never]">;
+def reproduce: Separate<["--"], "reproduce">;
+def reproduce_eq: Joined<["--"], "reproduce=">,
+    Alias<!cast<Separate>(reproduce)>,
+    HelpText<"Write tar file containing inputs and command to reproduce link">;
+
 
 // This is a complete Options.td compiled from Apple's ld(1) manpage
 // dated 2018-03-07 and cross checked with ld64 source code in repo
@@ -18,14 +34,12 @@ def grp_kind : OptionGroup<"kind">, HelpText<"OUTPUT KIND">;
 
 def execute : Flag<["-"], "execute">,
      HelpText<"Produce a main executable (default)">,
-     Flags<[HelpHidden]>,
      Group<grp_kind>;
 def dylib : Flag<["-"], "dylib">,
      HelpText<"Produce a shared library">,
      Group<grp_kind>;
 def bundle : Flag<["-"], "bundle">,
      HelpText<"Produce a bundle">,
-     Flags<[HelpHidden]>,
      Group<grp_kind>;
 def r : Flag<["-"], "r">,
      HelpText<"Merge multiple object files into one, retaining relocations">,
@@ -453,6 +467,9 @@ def dependency_info : Separate<["-"], "dependency_info">,
      HelpText<"Dump dependency info">,
      Flags<[HelpHidden]>,
      Group<grp_introspect>;
+def save_temps : Flag<["-"], "save-temps">,
+     HelpText<"Save temporary files instead of deleting them">,
+     Group<grp_introspect>;
 
 def grp_symtab : OptionGroup<"symtab">, HelpText<"SYMBOL TABLE OPTIMIZATIONS">;
 
@@ -591,8 +608,7 @@ def no_application_extension : Flag<["-"], "no_application_extension">,
      Flags<[HelpHidden]>,
      Group<grp_rare>;
 def fatal_warnings : Flag<["-"], "fatal_warnings">,
-     HelpText<"Escalate warnings as errors">,
-     Flags<[HelpHidden]>,
+     HelpText<"Treat warnings as errors">,
      Group<grp_rare>;
 def no_eh_labels : Flag<["-"], "no_eh_labels">,
      HelpText<"In -r mode, suppress .eh labels in the __eh_frame section">,
@@ -1092,9 +1108,7 @@ def debug_snapshot : Flag<["-"], "debug_snapshot">,
      Flags<[HelpHidden]>,
      Group<grp_undocumented>;
 def demangle : Flag<["-"], "demangle">,
-     HelpText<"This option is undocumented in ld64">,
-     Flags<[HelpHidden]>,
-     Group<grp_undocumented>;
+     HelpText<"Demangle symbol names in diagnostics">;
 def dyld_env : Flag<["-"], "dyld_env">,
      HelpText<"This option is undocumented in ld64">,
      Flags<[HelpHidden]>,
@@ -1230,10 +1244,6 @@ def pause : Flag<["-"], "pause">,
      Flags<[HelpHidden]>,
      Group<grp_undocumented>;
 def random_uuid : Flag<["-"], "random_uuid">,
-     HelpText<"This option is undocumented in ld64">,
-     Flags<[HelpHidden]>,
-     Group<grp_undocumented>;
-def save_temps : Flag<["-"], "save-temps">,
      HelpText<"This option is undocumented in ld64">,
      Flags<[HelpHidden]>,
      Group<grp_undocumented>;

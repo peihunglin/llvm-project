@@ -271,6 +271,8 @@ public:
     }
   }
 
+  const Symbol *GetFinalForRank(int) const;
+
 private:
   // These are (1) the names of the derived type parameters in the order
   // in which they appear on the type definition statement(s), and (2) the
@@ -491,6 +493,7 @@ public:
       LocalityLocalInit, // named in LOCAL_INIT locality-spec
       LocalityShared, // named in SHARED locality-spec
       InDataStmt, // initialized in a DATA statement
+      InNamelist, // flag is set if the symbol is in Namelist statement
       // OpenACC data-sharing attribute
       AccPrivate, AccFirstPrivate, AccShared,
       // OpenACC data-mapping attribute
@@ -501,10 +504,12 @@ public:
       OmpShared, OmpPrivate, OmpLinear, OmpFirstPrivate, OmpLastPrivate,
       // OpenMP data-mapping attribute
       OmpMapTo, OmpMapFrom, OmpMapAlloc, OmpMapRelease, OmpMapDelete,
+      // OpenMP data-copying attribute
+      OmpCopyIn,
       // OpenMP miscellaneous flags
       OmpCommonBlock, OmpReduction, OmpAllocate, OmpDeclareSimd,
       OmpDeclareTarget, OmpThreadprivate, OmpDeclareReduction, OmpFlushed,
-      OmpCriticalLock, OmpIfSpecified, OmpNone, OmpPreDetermined);
+      OmpCriticalLock, OmpIfSpecified, OmpNone, OmpPreDetermined, OmpAligned);
   using Flags = common::EnumSet<Flag, Flag_enumSize>;
 
   const Scope &owner() const { return *owner_; }

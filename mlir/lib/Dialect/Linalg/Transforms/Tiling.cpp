@@ -22,8 +22,8 @@
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineExprVisitor.h"
 #include "mlir/IR/AffineMap.h"
-#include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/FoldUtils.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "llvm/Support/CommandLine.h"
 
@@ -332,13 +332,8 @@ tileLinalgOpImpl(OpBuilder &b, LinalgOp op, ValueRange tileSizes,
   }
 
   // 1. Build the tiled loop ranges.
-  auto allShapeSizes = getShape(b, op);
-  // The flattened loopToOperandRangesMaps is expected to be an invertible
-  // permutation map (asserted in the inverse calculation).
-  auto mapsRange = op.indexing_maps().getAsRange<AffineMapAttr>();
-  auto maps = llvm::to_vector<8>(
-      llvm::map_range(mapsRange, [](AffineMapAttr a) { return a.getValue(); }));
-  auto shapeSizesToLoopsMap = inversePermutation(concatAffineMaps(maps));
+  auto allShapeSizes = op.createFlatListOfOperandDims(b, op.getLoc());
+  AffineMap shapeSizesToLoopsMap = op.getShapesToLoopsMap();
   if (!shapeSizesToLoopsMap)
     return llvm::None;
 
@@ -367,10 +362,11 @@ tileLinalgOpImpl(OpBuilder &b, LinalgOp op, ValueRange tileSizes,
         continue;
       interchangeVector.push_back(it->second);
     }
+    // Interchange vector is guaranteed to be a permutation,
+    // `inversePermutation` must succeed.
     invPermutationMap = inversePermutation(
         AffineMap::getPermutationMap(interchangeVector, b.getContext()));
-    if (!invPermutationMap)
-      return llvm::None;
+    assert(invPermutationMap);
     applyPermutationToVector(loopRanges, interchangeVector);
     applyPermutationToVector(iteratorTypes, interchangeVector);
   }
@@ -595,7 +591,7 @@ static void applyTilingToLoopPatterns(LinalgTilingLoopType loopType,
   MLIRContext *ctx = funcOp.getContext();
   OwningRewritePatternList patterns;
   insertTilingPatterns(patterns, options, ctx);
-  applyPatternsAndFoldGreedily(funcOp, patterns);
+  applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
   applyPatternsAndFoldGreedily(funcOp,
                                getLinalgTilingCanonicalizationPatterns(ctx));
   // Drop the marker.

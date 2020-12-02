@@ -24,6 +24,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SMLoc.h"
+#include "llvm/Support/Timer.h"
 #include "llvm/Support/TrailingObjects.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -88,7 +89,7 @@ public:
   /// a bit set is not an int, but they are convertible.
   virtual bool typeIsA(const RecTy *RHS) const;
 
-  /// Returns the type representing list<this>.
+  /// Returns the type representing list<thistype>.
   ListRecTy *getListTy();
 };
 
@@ -420,7 +421,7 @@ inline raw_ostream &operator<<(raw_ostream &OS, const Init &I) {
 }
 
 /// This is the common superclass of types that have a specific,
-/// explicit, type, stored in ValueTy.
+/// explicit type, stored in ValueTy.
 class TypedInit : public Init {
   RecTy *ValueTy;
 
@@ -437,6 +438,7 @@ public:
            I->getKind() <= IK_LastTypedInit;
   }
 
+  /// Get the type of the Init as a RecTy.
   RecTy *getType() const { return ValueTy; }
 
   Init *getCastTo(RecTy *Ty) const override;
@@ -451,7 +453,7 @@ public:
   RecTy *getFieldType(StringInit *FieldName) const override;
 };
 
-/// '?' - Represents an uninitialized value
+/// '?' - Represents an uninitialized value.
 class UnsetInit : public Init {
   UnsetInit() : Init(IK_UnsetInit) {}
 
@@ -463,6 +465,7 @@ public:
     return I->getKind() == IK_UnsetInit;
   }
 
+  /// Get the singleton unset Init.
   static UnsetInit *get();
 
   Init *getCastTo(RecTy *Ty) const override;
@@ -472,8 +475,12 @@ public:
     return const_cast<UnsetInit*>(this);
   }
 
+  /// Is this a complete value with no unset (uninitialized) subvalues?
   bool isComplete() const override { return false; }
+
   bool isConcrete() const override { return true; }
+
+  /// Get the string representation of the Init.
   std::string getAsString() const override { return "?"; }
 };
 
@@ -590,7 +597,13 @@ public:
 
 /// "foo" - Represent an initialization by a string value.
 class StringInit : public TypedInit {
+////  enum StringFormat {
+////    SF_String,  // Format as "text"
+////    SF_Code,    // Format as [{text}]
+////  };
+
   StringRef Value;
+////  StringFormat Format;
 
   explicit StringInit(StringRef V)
       : TypedInit(IK_StringInit, StringRecTy::get()), Value(V) {}
@@ -623,11 +636,10 @@ public:
 
 class CodeInit : public TypedInit {
   StringRef Value;
-  SMLoc Loc;
 
-  explicit CodeInit(StringRef V, const SMLoc &Loc)
+  explicit CodeInit(StringRef V)
       : TypedInit(IK_CodeInit, static_cast<RecTy *>(CodeRecTy::get())),
-        Value(V), Loc(Loc) {}
+        Value(V) {}
 
 public:
   CodeInit(const StringInit &) = delete;
@@ -637,10 +649,9 @@ public:
     return I->getKind() == IK_CodeInit;
   }
 
-  static CodeInit *get(StringRef, const SMLoc &Loc);
+  static CodeInit *get(StringRef);
 
   StringRef getValue() const { return Value; }
-  const SMLoc &getLoc() const { return Loc; }
 
   Init *convertInitializerTo(RecTy *Ty) const override;
 
@@ -753,7 +764,7 @@ public:
 ///
 class UnOpInit : public OpInit, public FoldingSetNode {
 public:
-  enum UnaryOp : uint8_t { CAST, NOT, HEAD, TAIL, SIZE, EMPTY, GETOP };
+  enum UnaryOp : uint8_t { CAST, NOT, HEAD, TAIL, SIZE, EMPTY, GETDAGOP };
 
 private:
   Init *LHS;
@@ -802,9 +813,9 @@ public:
 /// !op (X, Y) - Combine two inits.
 class BinOpInit : public OpInit, public FoldingSetNode {
 public:
-  enum BinaryOp : uint8_t { ADD, MUL, AND, OR, XOR, SHL, SRA, SRL, LISTCONCAT,
-                            LISTSPLAT, STRCONCAT, CONCAT, EQ, NE, LE, LT, GE,
-                            GT, SETOP };
+  enum BinaryOp : uint8_t { ADD, SUB, MUL, AND, OR, XOR, SHL, SRA, SRL, LISTCONCAT,
+                            LISTSPLAT, STRCONCAT, INTERLEAVE, CONCAT, EQ,
+                            NE, LE, LT, GE, GT, SETDAGOP };
 
 private:
   Init *LHS, *RHS;
@@ -824,7 +835,6 @@ public:
                         RecTy *Type);
   static Init *getStrConcat(Init *lhs, Init *rhs);
   static Init *getListConcat(TypedInit *lhs, Init *rhs);
-  static Init *getListSplat(TypedInit *lhs, Init *rhs);
 
   void Profile(FoldingSetNodeID &ID) const;
 
@@ -860,7 +870,7 @@ public:
 /// !op (X, Y, Z) - Combine two inits.
 class TernOpInit : public OpInit, public FoldingSetNode {
 public:
-  enum TernaryOp : uint8_t { SUBST, FOREACH, IF, DAG };
+  enum TernaryOp : uint8_t { SUBST, FOREACH, FILTER, IF, DAG };
 
 private:
   Init *LHS, *MHS, *RHS;
@@ -1395,6 +1405,8 @@ public:
 //  High-Level Classes
 //===----------------------------------------------------------------------===//
 
+/// This class represents a field in a record, including its name, type,
+/// value, and source location.
 class RecordVal {
   friend class Record;
 
@@ -1407,22 +1419,37 @@ public:
   RecordVal(Init *N, RecTy *T, bool P);
   RecordVal(Init *N, SMLoc Loc, RecTy *T, bool P);
 
+  /// Get the name of the field as a StringRef.
   StringRef getName() const;
+
+  /// Get the name of the field as an Init.
   Init *getNameInit() const { return Name; }
 
+  /// Get the name of the field as a std::string.
   std::string getNameInitAsString() const {
     return getNameInit()->getAsUnquotedString();
   }
 
+  /// Get the source location of the point where the field was defined.
   const SMLoc &getLoc() const { return Loc; }
+
   bool getPrefix() const { return TyAndPrefix.getInt(); }
+
+  /// Get the type of the field value as a RecTy.
   RecTy *getType() const { return TyAndPrefix.getPointer(); }
+
+  /// Get the value of the field as an Init.
   Init *getValue() const { return Value; }
 
+  /// Set the value of the field from an Init.
   bool setValue(Init *V);
+
+  /// Set the value and source location of the field.
   bool setValue(Init *V, SMLoc NewLoc);
 
   void dump() const;
+
+  /// Print the value to an output stream, possibly with a semicolon.
   void print(raw_ostream &OS, bool PrintSem = true) const;
 };
 
@@ -1626,6 +1653,9 @@ public:
   // High-level methods useful to tablegen back-ends
   //
 
+  ///Return the source location for the named field.
+  SMLoc getFieldLoc(StringRef FieldName) const;
+
   /// Return the initializer for a value with the specified name,
   /// or throw an exception if the field does not exist.
   Init *getValueInit(StringRef FieldName) const;
@@ -1721,6 +1751,13 @@ class RecordKeeper {
   std::map<std::string, Init *, std::less<>> ExtraGlobals;
   unsigned AnonCounter = 0;
 
+  // These members are for the phase timing feature. We need a timer group,
+  // the last timer started, and a flag to say whether the last timer
+  // is the special "backend overall timer."
+  TimerGroup *TimingGroup = nullptr;
+  Timer *LastTimer = nullptr;
+  bool BackendTimer = false;
+
 public:
   /// Get the main TableGen input file's name.
   const std::string getInputFilename() const { return InputFilename; }
@@ -1780,6 +1817,30 @@ public:
   }
 
   Init *getNewAnonymousName();
+
+  /// Start phase timing; called if the --time-phases option is specified.
+  void startPhaseTiming() {
+    TimingGroup = new TimerGroup("TableGen", "TableGen Phase Timing");
+  }
+
+  /// Start timing a phase. Automatically stops any previous phase timer.
+  void startTimer(StringRef Name);
+
+  /// Stop timing a phase.
+  void stopTimer();
+
+  /// Start timing the overall backend. If the backend itself starts a timer,
+  /// then this timer is cleared.
+  void startBackendTimer(StringRef Name);
+
+  /// Stop timing the overall backend.
+  void stopBackendTimer();
+
+  /// Stop phase timing and print the report.
+  void stopPhaseTiming() {
+    if (TimingGroup)
+      delete TimingGroup;
+  }
 
   //===--------------------------------------------------------------------===//
   // High-level helper methods, useful for tablegen backends.

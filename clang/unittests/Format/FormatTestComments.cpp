@@ -11,7 +11,6 @@
 #include "../Tooling/ReplacementTest.h"
 #include "FormatTestUtils.h"
 
-#include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "gtest/gtest.h"
@@ -744,6 +743,24 @@ TEST_F(FormatTestComments, DontSplitLineCommentsWithEscapedNewlines) {
                    "          // AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\\\n"
                    "          // AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                    getLLVMStyleWithColumns(49)));
+}
+
+TEST_F(FormatTestComments, DontIntroduceMultilineComments) {
+  // Avoid introducing a multiline comment by breaking after `\`.
+  for (int ColumnLimit = 15; ColumnLimit <= 17; ++ColumnLimit) {
+    EXPECT_EQ(
+        "// aaaaaaaaaa\n"
+        "// \\ bb",
+        format("// aaaaaaaaaa \\ bb", getLLVMStyleWithColumns(ColumnLimit)));
+    EXPECT_EQ(
+        "// aaaaaaaaa\n"
+        "// \\  bb",
+        format("// aaaaaaaaa \\  bb", getLLVMStyleWithColumns(ColumnLimit)));
+    EXPECT_EQ(
+        "// aaaaaaaaa\n"
+        "// \\  \\ bb",
+        format("// aaaaaaaaa \\  \\ bb", getLLVMStyleWithColumns(ColumnLimit)));
+  }
 }
 
 TEST_F(FormatTestComments, DontSplitLineCommentsWithPragmas) {

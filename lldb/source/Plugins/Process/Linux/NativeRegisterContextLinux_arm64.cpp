@@ -56,8 +56,8 @@ NativeRegisterContextLinux::CreateHostNativeRegisterContextLinux(
 
 NativeRegisterContextLinux_arm64::NativeRegisterContextLinux_arm64(
     const ArchSpec &target_arch, NativeThreadProtocol &native_thread)
-    : NativeRegisterContextLinux(native_thread,
-                                 new RegisterInfoPOSIX_arm64(target_arch)) {
+    : NativeRegisterContextRegisterInfo(
+          native_thread, new RegisterInfoPOSIX_arm64(target_arch)) {
   ::memset(&m_fpr, 0, sizeof(m_fpr));
   ::memset(&m_gpr_arm64, 0, sizeof(m_gpr_arm64));
   ::memset(&m_hwp_regs, 0, sizeof(m_hwp_regs));
@@ -1111,7 +1111,7 @@ uint32_t NativeRegisterContextLinux_arm64::CalculateSVEOffset(
     sve_reg_offset =
         SVE_PT_FPSIMD_OFFSET + (reg - GetRegisterInfo().GetRegNumSVEZ0()) * 16;
   } else if (m_sve_state == SVEState::Full) {
-    uint32_t sve_z0_offset = GetGPRSize() + 8;
+    uint32_t sve_z0_offset = GetGPRSize() + 16;
     sve_reg_offset =
         SVE_SIG_REGS_OFFSET + reg_info->byte_offset - sve_z0_offset;
   }
@@ -1123,6 +1123,16 @@ void *NativeRegisterContextLinux_arm64::GetSVEBuffer() {
     return m_sve_ptrace_payload.data() + SVE_PT_FPSIMD_OFFSET;
 
   return m_sve_ptrace_payload.data();
+}
+
+std::vector<uint32_t> NativeRegisterContextLinux_arm64::GetExpeditedRegisters(
+    ExpeditedRegs expType) const {
+  std::vector<uint32_t> expedited_reg_nums =
+      NativeRegisterContext::GetExpeditedRegisters(expType);
+  if (m_sve_state == SVEState::FPSIMD || m_sve_state == SVEState::Full)
+    expedited_reg_nums.push_back(GetRegisterInfo().GetRegNumSVEVG());
+
+  return expedited_reg_nums;
 }
 
 #endif // defined (__arm64__) || defined (__aarch64__)

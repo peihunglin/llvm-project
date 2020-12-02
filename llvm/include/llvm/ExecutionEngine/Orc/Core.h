@@ -1132,20 +1132,6 @@ private:
   void installMaterializationUnit(std::unique_ptr<MaterializationUnit> MU,
                                   ResourceTracker &RT);
 
-  // void lookupFlagsImpl(SymbolFlagsMap &Result, LookupKind K,
-  //                      JITDylibLookupFlags JDLookupFlags,
-  //                      SymbolLookupSet &Unresolved);
-
-  // Error lodgeQuery(UnmaterializedInfosList &UMIs,
-  //                  std::shared_ptr<AsynchronousSymbolQuery> &Q, LookupKind K,
-  //                  JITDylibLookupFlags JDLookupFlags,
-  //                  SymbolLookupSet &Unresolved);
-
-  // Error lodgeQueryImpl(UnmaterializedInfosList &UMIs,
-  //                      std::shared_ptr<AsynchronousSymbolQuery> &Q,
-  //                      LookupKind K, JITDylibLookupFlags JDLookupFlags,
-  //                      SymbolLookupSet &Unresolved);
-
   void detachQueryHelper(AsynchronousSymbolQuery &Q,
                          const SymbolNameSet &QuerySymbols);
 
@@ -1550,7 +1536,14 @@ Error JITDylib::define(std::unique_ptr<MaterializationUnitType> &&MU,
     return Error::success();
   } else
     DEBUG_WITH_TYPE("orc", {
-      dbgs() << "Defining MU " << MU->getName() << " for " << getName() << "\n";
+      dbgs() << "Defining MU " << MU->getName() << " for " << getName()
+             << " (tracker: ";
+      if (RT == getDefaultResourceTracker())
+        dbgs() << "default)";
+      else if (RT)
+        dbgs() << RT.get() << ")\n";
+      else
+        dbgs() << "0x0, default will be used)\n";
     });
 
   return ES.runSessionLocked([&, this]() -> Error {
@@ -1584,7 +1577,14 @@ Error JITDylib::define(std::unique_ptr<MaterializationUnitType> &MU,
     return Error::success();
   } else
     DEBUG_WITH_TYPE("orc", {
-      dbgs() << "Defining MU " << MU->getName() << " for " << getName() << "\n";
+      dbgs() << "Defining MU " << MU->getName() << " for " << getName()
+             << " (tracker: ";
+      if (RT == getDefaultResourceTracker())
+        dbgs() << "default)";
+      else if (RT)
+        dbgs() << RT.get() << ")\n";
+      else
+        dbgs() << "0x0, default will be used)\n";
     });
 
   return ES.runSessionLocked([&, this]() -> Error {

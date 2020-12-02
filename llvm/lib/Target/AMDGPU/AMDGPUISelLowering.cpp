@@ -397,6 +397,9 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::ROTL, MVT::i64, Expand);
   setOperationAction(ISD::ROTR, MVT::i64, Expand);
 
+  setOperationAction(ISD::MULHU, MVT::i16, Expand);
+  setOperationAction(ISD::MULHS, MVT::i16, Expand);
+
   setOperationAction(ISD::MUL, MVT::i64, Expand);
   setOperationAction(ISD::MULHU, MVT::i64, Expand);
   setOperationAction(ISD::MULHS, MVT::i64, Expand);
@@ -939,6 +942,8 @@ CCAssignFn *AMDGPUCallLowering::CCAssignFnForCall(CallingConv::ID CC,
   case CallingConv::Fast:
   case CallingConv::Cold:
     return CC_AMDGPU_Func;
+  case CallingConv::AMDGPU_Gfx:
+    return CC_SI_Gfx;
   case CallingConv::AMDGPU_KERNEL:
   case CallingConv::SPIR_KERNEL:
   default:
@@ -960,6 +965,8 @@ CCAssignFn *AMDGPUCallLowering::CCAssignFnForReturn(CallingConv::ID CC,
   case CallingConv::AMDGPU_ES:
   case CallingConv::AMDGPU_LS:
     return RetCC_SI_Shader;
+  case CallingConv::AMDGPU_Gfx:
+    return RetCC_SI_Gfx;
   case CallingConv::C:
   case CallingConv::Fast:
   case CallingConv::Cold:
@@ -1563,17 +1570,25 @@ SDValue AMDGPUTargetLowering::SplitVectorLoad(const SDValue Op,
   return DAG.getMergeValues(Ops, SL);
 }
 
-// Widen a vector load from vec3 to vec4.
-SDValue AMDGPUTargetLowering::WidenVectorLoad(SDValue Op,
-                                              SelectionDAG &DAG) const {
+SDValue AMDGPUTargetLowering::WidenOrSplitVectorLoad(SDValue Op,
+                                                     SelectionDAG &DAG) const {
   LoadSDNode *Load = cast<LoadSDNode>(Op);
   EVT VT = Op.getValueType();
-  assert(VT.getVectorNumElements() == 3);
   SDValue BasePtr = Load->getBasePtr();
   EVT MemVT = Load->getMemoryVT();
   SDLoc SL(Op);
   const MachinePointerInfo &SrcValue = Load->getMemOperand()->getPointerInfo();
   unsigned BaseAlign = Load->getAlignment();
+  unsigned NumElements = MemVT.getVectorNumElements();
+
+  // Widen from vec3 to vec4 when the load is at least 8-byte aligned
+  // or 16-byte fully dereferenceable. Otherwise, split the vector load.
+  if (NumElements != 3 ||
+      (BaseAlign < 8 &&
+       !SrcValue.isDereferenceable(16, *DAG.getContext(), DAG.getDataLayout())))
+    return SplitVectorLoad(Op, DAG);
+
+  assert(NumElements == 3);
 
   EVT WideVT =
       EVT::getVectorVT(*DAG.getContext(), VT.getVectorElementType(), 4);
@@ -3281,17 +3296,13 @@ static SDValue getMul24(SelectionDAG &DAG, const SDLoc &SL,
     return DAG.getNode(MulOpc, SL, MVT::i32, N0, N1);
   }
 
-  // Because we want to eliminate extension instructions before the
-  // operation, we need to create a single user here (i.e. not the separate
-  // mul_lo + mul_hi) so that SimplifyDemandedBits will deal with it.
+  unsigned MulLoOpc = Signed ? AMDGPUISD::MUL_I24 : AMDGPUISD::MUL_U24;
+  unsigned MulHiOpc = Signed ? AMDGPUISD::MULHI_I24 : AMDGPUISD::MULHI_U24;
 
-  unsigned MulOpc = Signed ? AMDGPUISD::MUL_LOHI_I24 : AMDGPUISD::MUL_LOHI_U24;
+  SDValue MulLo = DAG.getNode(MulLoOpc, SL, MVT::i32, N0, N1);
+  SDValue MulHi = DAG.getNode(MulHiOpc, SL, MVT::i32, N0, N1);
 
-  SDValue Mul = DAG.getNode(MulOpc, SL,
-                            DAG.getVTList(MVT::i32, MVT::i32), N0, N1);
-
-  return DAG.getNode(ISD::BUILD_PAIR, SL, MVT::i64,
-                     Mul.getValue(0), Mul.getValue(1));
+  return DAG.getNode(ISD::BUILD_PAIR, SL, MVT::i64, MulLo, MulHi);
 }
 
 SDValue AMDGPUTargetLowering::performMulCombine(SDNode *N,
@@ -3387,29 +3398,6 @@ SDValue AMDGPUTargetLowering::performMulhuCombine(SDNode *N,
   SDValue Mulhi = DAG.getNode(AMDGPUISD::MULHI_U24, DL, MVT::i32, N0, N1);
   DCI.AddToWorklist(Mulhi.getNode());
   return DAG.getZExtOrTrunc(Mulhi, DL, VT);
-}
-
-SDValue AMDGPUTargetLowering::performMulLoHi24Combine(
-  SDNode *N, DAGCombinerInfo &DCI) const {
-  SelectionDAG &DAG = DCI.DAG;
-
-  // Simplify demanded bits before splitting into multiple users.
-  if (SDValue V = simplifyI24(N, DCI))
-    return V;
-
-  SDValue N0 = N->getOperand(0);
-  SDValue N1 = N->getOperand(1);
-
-  bool Signed = (N->getOpcode() == AMDGPUISD::MUL_LOHI_I24);
-
-  unsigned MulLoOpc = Signed ? AMDGPUISD::MUL_I24 : AMDGPUISD::MUL_U24;
-  unsigned MulHiOpc = Signed ? AMDGPUISD::MULHI_I24 : AMDGPUISD::MULHI_U24;
-
-  SDLoc SL(N);
-
-  SDValue MulLo = DAG.getNode(MulLoOpc, SL, MVT::i32, N0, N1);
-  SDValue MulHi = DAG.getNode(MulHiOpc, SL, MVT::i32, N0, N1);
-  return DAG.getMergeValues({ MulLo, MulHi }, SL);
 }
 
 static bool isNegativeOne(SDValue Val) {
@@ -3999,9 +3987,6 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
       return V;
     return SDValue();
   }
-  case AMDGPUISD::MUL_LOHI_I24:
-  case AMDGPUISD::MUL_LOHI_U24:
-    return performMulLoHi24Combine(N, DCI);
   case ISD::SELECT:
     return performSelectCombine(N, DCI);
   case ISD::FNEG:
@@ -4285,8 +4270,6 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(MUL_I24)
   NODE_NAME_CASE(MULHI_U24)
   NODE_NAME_CASE(MULHI_I24)
-  NODE_NAME_CASE(MUL_LOHI_U24)
-  NODE_NAME_CASE(MUL_LOHI_I24)
   NODE_NAME_CASE(MAD_U24)
   NODE_NAME_CASE(MAD_I24)
   NODE_NAME_CASE(MAD_I64_I32)

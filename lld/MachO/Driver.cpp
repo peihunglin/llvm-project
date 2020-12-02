@@ -8,8 +8,8 @@
 
 #include "Driver.h"
 #include "Config.h"
-#include "DriverUtils.h"
 #include "InputFiles.h"
+#include "LTO.h"
 #include "ObjC.h"
 #include "OutputSection.h"
 #include "OutputSegment.h"
@@ -30,13 +30,15 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/MachO.h"
 #include "llvm/BinaryFormat/Magic.h"
+#include "llvm/LTO/LTO.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Option/ArgList.h"
-#include "llvm/Option/Option.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/TarWriter.h"
+#include "llvm/Support/TargetSelect.h"
 
 #include <algorithm>
 
@@ -49,44 +51,6 @@ using namespace lld;
 using namespace lld::macho;
 
 Configuration *lld::macho::config;
-
-// Create prefix string literals used in Options.td
-#define PREFIX(NAME, VALUE) const char *NAME[] = VALUE;
-#include "Options.inc"
-#undef PREFIX
-
-// Create table mapping all options defined in Options.td
-static const opt::OptTable::Info optInfo[] = {
-#define OPTION(X1, X2, ID, KIND, GROUP, ALIAS, X7, X8, X9, X10, X11, X12)      \
-  {X1, X2, X10,         X11,         OPT_##ID, opt::Option::KIND##Class,       \
-   X9, X8, OPT_##GROUP, OPT_##ALIAS, X7,       X12},
-#include "Options.inc"
-#undef OPTION
-};
-
-MachOOptTable::MachOOptTable() : OptTable(optInfo) {}
-
-opt::InputArgList MachOOptTable::parse(ArrayRef<const char *> argv) {
-  // Make InputArgList from string vectors.
-  unsigned missingIndex;
-  unsigned missingCount;
-  SmallVector<const char *, 256> vec(argv.data(), argv.data() + argv.size());
-
-  opt::InputArgList args = ParseArgs(vec, missingIndex, missingCount);
-
-  if (missingCount)
-    error(Twine(args.getArgString(missingIndex)) + ": missing argument");
-
-  for (opt::Arg *arg : args.filtered(OPT_UNKNOWN))
-    error("unknown argument: " + arg->getSpelling());
-  return args;
-}
-
-void MachOOptTable::printHelp(const char *argv0, bool showHidden) const {
-  PrintHelp(lld::outs(), (std::string(argv0) + " [options] file...").c_str(),
-            "LLVM Linker", showHidden);
-  lld::outs() << "\n";
-}
 
 static HeaderFileType getOutputType(const opt::InputArgList &args) {
   // TODO: -r, -dylinker, -preload...
@@ -214,7 +178,7 @@ getSearchPaths(unsigned optionCode, opt::InputArgList &args,
     for (auto root : roots) {
       SmallString<261> buffer(root);
       path::append(buffer, path);
-      if (warnIfNotDirectory(optionLetter, buffer))
+      if (fs::is_directory(buffer))
         paths.push_back(saver.save(buffer.str()));
     }
   }
@@ -312,19 +276,22 @@ static InputFile *addFile(StringRef path) {
     newFile = make<ObjFile>(mbref);
     break;
   case file_magic::macho_dynamically_linked_shared_lib:
+  case file_magic::macho_dynamically_linked_shared_lib_stub:
     newFile = make<DylibFile>(mbref);
     break;
   case file_magic::tapi_file: {
-    Optional<DylibFile *> dylibFile = makeDylibFromTAPI(mbref);
-    if (!dylibFile)
-      return nullptr;
-    newFile = *dylibFile;
+    if (Optional<DylibFile *> dylibFile = makeDylibFromTAPI(mbref))
+      newFile = *dylibFile;
     break;
   }
+  case file_magic::bitcode:
+    newFile = make<BitcodeFile>(mbref);
+    break;
   default:
     error(path + ": unhandled file type");
   }
-  inputFiles.push_back(newFile);
+  if (newFile)
+    inputFiles.push_back(newFile);
   return newFile;
 }
 
@@ -454,6 +421,27 @@ static bool markSubLibrary(StringRef searchName) {
   return false;
 }
 
+// This function is called on startup. We need this for LTO since
+// LTO calls LLVM functions to compile bitcode files to native code.
+// Technically this can be delayed until we read bitcode files, but
+// we don't bother to do lazily because the initialization is fast.
+static void initLLVM() {
+  InitializeAllTargets();
+  InitializeAllTargetMCs();
+  InitializeAllAsmPrinters();
+  InitializeAllAsmParsers();
+}
+
+static void compileBitcodeFiles() {
+  auto lto = make<BitcodeCompiler>();
+  for (InputFile *file : inputFiles)
+    if (auto *bitcodeFile = dyn_cast<BitcodeFile>(file))
+      lto->add(*bitcodeFile);
+
+  for (ObjFile *file : lto->compile())
+    inputFiles.push_back(file);
+}
+
 // Replaces common symbols with defined symbols residing in __common sections.
 // This function must be called after all symbol names are resolved (i.e. after
 // all InputFiles have been loaded.) As a result, later operations won't see
@@ -561,6 +549,12 @@ static void warnIfUnimplementedOption(const opt::Option &opt) {
   }
 }
 
+static const char *getReproduceOption(opt::InputArgList &args) {
+  if (auto *arg = args.getLastArg(OPT_reproduce))
+    return arg->getValue();
+  return getenv("LLD_REPRODUCE");
+}
+
 bool macho::link(llvm::ArrayRef<const char *> argsArr, bool canExitEarly,
                  raw_ostream &stdoutOS, raw_ostream &stderrOS) {
   lld::stdoutOS = &stdoutOS;
@@ -582,6 +576,20 @@ bool macho::link(llvm::ArrayRef<const char *> argsArr, bool canExitEarly,
     return true;
   }
 
+  if (const char *path = getReproduceOption(args)) {
+    // Note that --reproduce is a debug option so you can ignore it
+    // if you are trying to understand the whole picture of the code.
+    Expected<std::unique_ptr<TarWriter>> errOrWriter =
+        TarWriter::create(path, path::stem(path));
+    if (errOrWriter) {
+      tar = std::move(*errOrWriter);
+      tar->append("response.txt", createResponseFile(args));
+      tar->append("version.txt", getLLDVersion() + "\n");
+    } else {
+      error("--reproduce: " + toString(errOrWriter.takeError()));
+    }
+  }
+
   config = make<Configuration>();
   symtab = make<SymbolTable>();
   target = createTargetInfo(args);
@@ -597,6 +605,7 @@ bool macho::link(llvm::ArrayRef<const char *> argsArr, bool canExitEarly,
   config->runtimePaths = args::getStrings(args, OPT_rpath);
   config->allLoad = args.hasArg(OPT_all_load);
   config->forceLoadObjC = args.hasArg(OPT_ObjC);
+  config->demangle = args.hasArg(OPT_demangle);
 
   if (const opt::Arg *arg = args.getLastArg(OPT_static, OPT_dynamic))
     config->staticLink = (arg->getOption().getID() == OPT_static);
@@ -610,6 +619,8 @@ bool macho::link(llvm::ArrayRef<const char *> argsArr, bool canExitEarly,
           args.getLastArg(OPT_search_paths_first, OPT_search_dylibs_first))
     config->searchDylibsFirst =
         (arg && arg->getOption().getID() == OPT_search_dylibs_first);
+
+  config->saveTemps = args.hasArg(OPT_save_temps);
 
   if (args.hasArg(OPT_v)) {
     message(getLLDVersion());
@@ -691,6 +702,8 @@ bool macho::link(llvm::ArrayRef<const char *> argsArr, bool canExitEarly,
       error("-sub_library " + searchName + " does not match a supplied dylib");
   }
 
+  initLLVM();
+  compileBitcodeFiles();
   replaceCommonSymbols();
 
   StringRef orderFile = args.getLastArgValue(OPT_order_file);
