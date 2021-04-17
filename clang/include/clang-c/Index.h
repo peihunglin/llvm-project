@@ -2568,9 +2568,29 @@ enum CXCursorKind {
    */
   CXCursor_OMPScanDirective = 287,
 
+  /** OpenMP tile directive.
+   */
+  CXCursor_OMPTileDirective = 288,
+
+  /** OpenMP canonical loop.
+   */
+  CXCursor_OMPCanonicalLoop = 289,
+
+  /** OpenMP interop directive.
+   */
+  CXCursor_OMPInteropDirective = 290,
+
+  /** OpenMP dispatch directive.
+   */
+  CXCursor_OMPDispatchDirective = 291,
+
+  /** OpenMP masked directive.
+   */
+  CXCursor_OMPMaskedDirective = 292,
+
   /** OpenMP metadirective directive.
    */
-  CXCursor_OMPMetaDirective = 288,
+  CXCursor_OMPMetaDirective = 293,
 
   CXCursor_LastStmt = CXCursor_OMPMetaDirective,
 

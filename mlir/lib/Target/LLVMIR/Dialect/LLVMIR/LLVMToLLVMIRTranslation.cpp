@@ -19,10 +19,12 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/MatrixBuilder.h"
 #include "llvm/IR/Operator.h"
 
 using namespace mlir;
 using namespace mlir::LLVM;
+using mlir::LLVM::detail::getLLVMConstant;
 
 #include "mlir/Dialect/LLVMIR/LLVMConversionEnumsToLLVM.inc"
 
@@ -166,26 +168,89 @@ static llvm::FastMathFlags getFastmathFlags(FastmathFlagsInterface &op) {
   return ret;
 }
 
-namespace {
-/// Dispatcher functional object targeting different overloads of
-/// ModuleTranslation::mapValue.
-// TODO: this is only necessary for compatibility with the code emitted from
-// ODS, remove when ODS is updated (after all dialects have migrated to the new
-// translation mechanism).
-struct MapValueDispatcher {
-  explicit MapValueDispatcher(ModuleTranslation &mt) : moduleTranslation(mt) {}
-
-  llvm::Value *&operator()(mlir::Value v) {
-    return moduleTranslation.mapValue(v);
+/// Returns an LLVM metadata node corresponding to a loop option. This metadata
+/// is attached to an llvm.loop node.
+static llvm::MDNode *getLoopOptionMetadata(llvm::LLVMContext &ctx,
+                                           LoopOptionCase option,
+                                           int64_t value) {
+  StringRef name;
+  llvm::Constant *cstValue = nullptr;
+  switch (option) {
+  case LoopOptionCase::disable_licm:
+    name = "llvm.licm.disable";
+    cstValue = llvm::ConstantInt::getBool(ctx, value);
+    break;
+  case LoopOptionCase::disable_unroll:
+    name = "llvm.loop.unroll.disable";
+    cstValue = llvm::ConstantInt::getBool(ctx, value);
+    break;
+  case LoopOptionCase::interleave_count:
+    name = "llvm.loop.interleave.count";
+    cstValue = llvm::ConstantInt::get(
+        llvm::IntegerType::get(ctx, /*NumBits=*/32), value);
+    break;
+  case LoopOptionCase::disable_pipeline:
+    name = "llvm.loop.pipeline.disable";
+    cstValue = llvm::ConstantInt::getBool(ctx, value);
+    break;
+  case LoopOptionCase::pipeline_initiation_interval:
+    name = "llvm.loop.pipeline.initiationinterval";
+    cstValue = llvm::ConstantInt::get(
+        llvm::IntegerType::get(ctx, /*NumBits=*/32), value);
+    break;
   }
+  return llvm::MDNode::get(ctx, {llvm::MDString::get(ctx, name),
+                                 llvm::ConstantAsMetadata::get(cstValue)});
+}
 
-  void operator()(mlir::Value m, llvm::Value *l) {
-    moduleTranslation.mapValue(m, l);
+static void setLoopMetadata(Operation &opInst, llvm::Instruction &llvmInst,
+                            llvm::IRBuilderBase &builder,
+                            LLVM::ModuleTranslation &moduleTranslation) {
+  if (Attribute attr = opInst.getAttr(LLVMDialect::getLoopAttrName())) {
+    llvm::Module *module = builder.GetInsertBlock()->getModule();
+    llvm::MDNode *loopMD = moduleTranslation.lookupLoopOptionsMetadata(attr);
+    if (!loopMD) {
+      llvm::LLVMContext &ctx = module->getContext();
+
+      SmallVector<llvm::Metadata *> loopOptions;
+      // Reserve operand 0 for loop id self reference.
+      auto dummy = llvm::MDNode::getTemporary(ctx, llvm::None);
+      loopOptions.push_back(dummy.get());
+
+      auto loopAttr = attr.cast<DictionaryAttr>();
+      auto parallelAccessGroup =
+          loopAttr.getNamed(LLVMDialect::getParallelAccessAttrName());
+      if (parallelAccessGroup.hasValue()) {
+        SmallVector<llvm::Metadata *> parallelAccess;
+        parallelAccess.push_back(
+            llvm::MDString::get(ctx, "llvm.loop.parallel_accesses"));
+        for (SymbolRefAttr accessGroupRef :
+             parallelAccessGroup->second.cast<ArrayAttr>()
+                 .getAsRange<SymbolRefAttr>())
+          parallelAccess.push_back(
+              moduleTranslation.getAccessGroup(opInst, accessGroupRef));
+        loopOptions.push_back(llvm::MDNode::get(ctx, parallelAccess));
+      }
+
+      if (auto loopOptionsAttr = loopAttr.getAs<LoopOptionsAttr>(
+              LLVMDialect::getLoopOptionsAttrName())) {
+        for (auto option : loopOptionsAttr.getOptions())
+          loopOptions.push_back(
+              getLoopOptionMetadata(ctx, option.first, option.second));
+      }
+
+      // Create loop options and set the first operand to itself.
+      loopMD = llvm::MDNode::get(ctx, loopOptions);
+      loopMD->replaceOperandWith(0, loopMD);
+
+      // Store a map from this Attribute to the LLVM metadata in case we
+      // encounter it again.
+      moduleTranslation.mapLoopOptionsMetadata(attr, loopMD);
+    }
+
+    llvmInst.setMetadata(module->getMDKindID("llvm.loop"), loopMD);
   }
-
-  LLVM::ModuleTranslation &moduleTranslation;
-};
-} // end namespace
+}
 
 static LogicalResult
 convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
@@ -201,21 +266,6 @@ convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
   llvm::IRBuilder<>::FastMathFlagGuard fmfGuard(builder);
   if (auto fmf = dyn_cast<FastmathFlagsInterface>(opInst))
     builder.setFastMathFlags(getFastmathFlags(fmf));
-
-  // TODO: these are necessary for compatibility with the code emitted from ODS,
-  // remove them when ODS is updated (after all dialects have migrated to the
-  // new translation mechanism).
-  MapValueDispatcher mapValue(moduleTranslation);
-  auto lookupValue = [&](mlir::Value v) {
-    return moduleTranslation.lookupValue(v);
-  };
-  auto convertType = [&](Type ty) { return moduleTranslation.convertType(ty); };
-  auto lookupValues = [&](ValueRange vs) {
-    return moduleTranslation.lookupValues(vs);
-  };
-  auto getLLVMConstant = [&](llvm::Type *ty, Attribute attr, Location loc) {
-    return moduleTranslation.getLLVMConstant(ty, attr, loc);
-  };
 
 #include "mlir/Dialect/LLVMIR/LLVMConversions.inc"
 
@@ -243,7 +293,7 @@ convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
   if (isa<LLVM::CallOp>(opInst)) {
     llvm::Value *result = convertCall(opInst);
     if (opInst.getNumResults() != 0) {
-      mapValue(opInst.getResult(0), result);
+      moduleTranslation.mapValue(opInst.getResult(0), result);
       return success();
     }
     // Check that LLVM call returns void for 0-result functions.
@@ -269,23 +319,25 @@ convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
     llvm::InlineAsm *inlineAsmInst =
         inlineAsmOp.asm_dialect().hasValue()
             ? llvm::InlineAsm::get(
-                  static_cast<llvm::FunctionType *>(convertType(ft)),
+                  static_cast<llvm::FunctionType *>(
+                      moduleTranslation.convertType(ft)),
                   inlineAsmOp.asm_string(), inlineAsmOp.constraints(),
                   inlineAsmOp.has_side_effects(), inlineAsmOp.is_align_stack(),
                   convertAsmDialectToLLVM(*inlineAsmOp.asm_dialect()))
             : llvm::InlineAsm::get(
-                  static_cast<llvm::FunctionType *>(convertType(ft)),
+                  static_cast<llvm::FunctionType *>(
+                      moduleTranslation.convertType(ft)),
                   inlineAsmOp.asm_string(), inlineAsmOp.constraints(),
                   inlineAsmOp.has_side_effects(), inlineAsmOp.is_align_stack());
-    llvm::Value *result =
-        builder.CreateCall(inlineAsmInst, lookupValues(inlineAsmOp.operands()));
+    llvm::Value *result = builder.CreateCall(
+        inlineAsmInst, moduleTranslation.lookupValues(inlineAsmOp.operands()));
     if (opInst.getNumResults() != 0)
-      mapValue(opInst.getResult(0), result);
+      moduleTranslation.mapValue(opInst.getResult(0), result);
     return success();
   }
 
   if (auto invOp = dyn_cast<LLVM::InvokeOp>(opInst)) {
-    auto operands = lookupValues(opInst.getOperands());
+    auto operands = moduleTranslation.lookupValues(opInst.getOperands());
     ArrayRef<llvm::Value *> operandsRef(operands);
     if (auto attr = opInst.getAttrOfType<FlatSymbolRefAttr>("callee")) {
       builder.CreateInvoke(moduleTranslation.lookupFunction(attr.getValue()),
@@ -306,17 +358,18 @@ convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
   }
 
   if (auto lpOp = dyn_cast<LLVM::LandingpadOp>(opInst)) {
-    llvm::Type *ty = convertType(lpOp.getType());
+    llvm::Type *ty = moduleTranslation.convertType(lpOp.getType());
     llvm::LandingPadInst *lpi =
         builder.CreateLandingPad(ty, lpOp.getNumOperands());
 
     // Add clauses
-    for (llvm::Value *operand : lookupValues(lpOp.getOperands())) {
+    for (llvm::Value *operand :
+         moduleTranslation.lookupValues(lpOp.getOperands())) {
       // All operands should be constant - checked by verifier
       if (auto *constOperand = dyn_cast<llvm::Constant>(operand))
         lpi->addClause(constOperand);
     }
-    mapValue(lpOp.getResult(), lpi);
+    moduleTranslation.mapValue(lpOp.getResult(), lpi);
     return success();
   }
 
@@ -326,6 +379,7 @@ convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
     llvm::BranchInst *branch =
         builder.CreateBr(moduleTranslation.lookupBlock(brOp.getSuccessor()));
     moduleTranslation.mapBranch(&opInst, branch);
+    setLoopMetadata(opInst, *branch, builder, moduleTranslation);
     return success();
   }
   if (auto condbrOp = dyn_cast<LLVM::CondBrOp>(opInst)) {
@@ -347,6 +401,7 @@ convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
         moduleTranslation.lookupBlock(condbrOp.getSuccessor(0)),
         moduleTranslation.lookupBlock(condbrOp.getSuccessor(1)), branchWeights);
     moduleTranslation.mapBranch(&opInst, branch);
+    setLoopMetadata(opInst, *branch, builder, moduleTranslation);
     return success();
   }
   if (auto switchOp = dyn_cast<LLVM::SwitchOp>(opInst)) {
@@ -365,8 +420,8 @@ convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
         moduleTranslation.lookupBlock(switchOp.defaultDestination()),
         switchOp.caseDestinations().size(), branchWeights);
 
-    auto *ty =
-        llvm::cast<llvm::IntegerType>(convertType(switchOp.value().getType()));
+    auto *ty = llvm::cast<llvm::IntegerType>(
+        moduleTranslation.convertType(switchOp.value().getType()));
     for (auto i :
          llvm::zip(switchOp.case_values()->cast<DenseIntElementsAttr>(),
                    switchOp.caseDestinations()))
@@ -389,17 +444,42 @@ convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
     assert((global || function) &&
            "referencing an undefined global or function");
 
-    mapValue(addressOfOp.getResult(),
-             global ? moduleTranslation.lookupGlobal(global)
-                    : moduleTranslation.lookupFunction(function.getName()));
+    moduleTranslation.mapValue(
+        addressOfOp.getResult(),
+        global ? moduleTranslation.lookupGlobal(global)
+               : moduleTranslation.lookupFunction(function.getName()));
     return success();
   }
 
   return failure();
 }
 
-LogicalResult mlir::LLVMDialectLLVMIRTranslationInterface::convertOperation(
-    Operation *op, llvm::IRBuilderBase &builder,
-    LLVM::ModuleTranslation &moduleTranslation) const {
-  return convertOperationImpl(*op, builder, moduleTranslation);
+namespace {
+/// Implementation of the dialect interface that converts operations belonging
+/// to the LLVM dialect to LLVM IR.
+class LLVMDialectLLVMIRTranslationInterface
+    : public LLVMTranslationDialectInterface {
+public:
+  using LLVMTranslationDialectInterface::LLVMTranslationDialectInterface;
+
+  /// Translates the given operation to LLVM IR using the provided IR builder
+  /// and saving the state in `moduleTranslation`.
+  LogicalResult
+  convertOperation(Operation *op, llvm::IRBuilderBase &builder,
+                   LLVM::ModuleTranslation &moduleTranslation) const final {
+    return convertOperationImpl(*op, builder, moduleTranslation);
+  }
+};
+} // end namespace
+
+void mlir::registerLLVMDialectTranslation(DialectRegistry &registry) {
+  registry.insert<LLVM::LLVMDialect>();
+  registry.addDialectInterface<LLVM::LLVMDialect,
+                               LLVMDialectLLVMIRTranslationInterface>();
+}
+
+void mlir::registerLLVMDialectTranslation(MLIRContext &context) {
+  DialectRegistry registry;
+  registerLLVMDialectTranslation(registry);
+  context.appendDialectRegistry(registry);
 }

@@ -62,6 +62,7 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/PostOrderIterator.h"
+#include "llvm/ADT/SetOperations.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SparseBitVector.h"
@@ -389,8 +390,7 @@ public:
     if (Members.size() != Other->Members.size())
       return false;
 
-    return all_of(Members,
-                  [&](const Value *V) { return Other->Members.count(V); });
+    return llvm::set_is_subset(Members, Other->Members);
   }
 
 private:
@@ -2758,6 +2758,14 @@ NewGVN::makePossiblePHIOfOps(Instruction *I,
         dbgs()
         << "Not creating real PHI of ops because it simplified to existing "
            "value or constant\n");
+    // We have leaders for all operands, but do not create a real PHI node with
+    // those leaders as operands, so the link between the operands and the
+    // PHI-of-ops is not materialized in the IR. If any of those leaders
+    // changes, the PHI-of-op may change also, so we need to add the operands as
+    // additional users.
+    for (auto &O : PHIOps)
+      addAdditionalUsers(O.first, I);
+
     return E;
   }
   auto *ValuePHI = RealToTemp.lookup(I);

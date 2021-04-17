@@ -39,6 +39,12 @@ using InterfaceAllocatorFunction =
 ///
 class Dialect {
 public:
+  /// Type for a callback provided by the dialect to parse a custom operation.
+  /// This is used for the dialect to provide an alternative way to parse custom
+  /// operations, including unregistered ones.
+  using ParseOpHook =
+      function_ref<ParseResult(OpAsmParser &parser, OperationState &result)>;
+
   virtual ~Dialect();
 
   /// Utility function that returns if the given string is a valid dialect
@@ -97,6 +103,18 @@ public:
     llvm_unreachable("dialect has no registered type printing hook");
   }
 
+  /// Return the hook to parse an operation registered to this dialect, if any.
+  /// By default this will lookup for registered operations and return the
+  /// `parse()` method registered on the AbstractOperation. Dialects can
+  /// override this behavior and handle unregistered operations as well.
+  virtual Optional<ParseOpHook> getParseOperationHook(StringRef opName) const;
+
+  /// Print an operation registered to this dialect.
+  /// This hook is invoked for registered operation which don't override the
+  /// `print()` method to define their own custom assembly.
+  virtual LogicalResult printOperation(Operation *op,
+                                       OpAsmPrinter &printer) const;
+
   //===--------------------------------------------------------------------===//
   // Verification Hooks
   //===--------------------------------------------------------------------===//
@@ -138,6 +156,19 @@ public:
   template <typename InterfaceT> const InterfaceT *getRegisteredInterface() {
     return static_cast<const InterfaceT *>(
         getRegisteredInterface(InterfaceT::getInterfaceID()));
+  }
+
+  /// Lookup an op interface for the given ID if one is registered, otherwise
+  /// nullptr.
+  virtual void *getRegisteredInterfaceForOp(TypeID interfaceID,
+                                            OperationName opName) {
+    return nullptr;
+  }
+  template <typename InterfaceT>
+  typename InterfaceT::Concept *
+  getRegisteredInterfaceForOp(OperationName opName) {
+    return static_cast<typename InterfaceT::Concept *>(
+        getRegisteredInterfaceForOp(InterfaceT::getInterfaceID(), opName));
   }
 
 protected:
@@ -239,7 +270,8 @@ class DialectRegistry {
   using MapTy =
       std::map<std::string, std::pair<TypeID, DialectAllocatorFunction>>;
   using InterfaceMapTy =
-      DenseMap<TypeID, SmallVector<InterfaceAllocatorFunction, 2>>;
+      DenseMap<TypeID,
+               SmallVector<std::pair<TypeID, InterfaceAllocatorFunction>, 2>>;
 
 public:
   explicit DialectRegistry() {}
@@ -292,17 +324,20 @@ public:
   /// dialect provided as template parameter. The dialect must be present in
   /// the registry.
   template <typename DialectTy>
-  void addDialectInterface(InterfaceAllocatorFunction allocator) {
-    addDialectInterface(DialectTy::getDialectNamespace(), allocator);
+  void addDialectInterface(TypeID interfaceTypeID,
+                           InterfaceAllocatorFunction allocator) {
+    addDialectInterface(DialectTy::getDialectNamespace(), interfaceTypeID,
+                        allocator);
   }
 
   /// Add an interface to the dialect, both provided as template parameter. The
   /// dialect must be present in the registry.
   template <typename DialectTy, typename InterfaceTy>
   void addDialectInterface() {
-    addDialectInterface<DialectTy>([](Dialect *dialect) {
-      return std::make_unique<InterfaceTy>(dialect);
-    });
+    addDialectInterface<DialectTy>(
+        InterfaceTy::getInterfaceID(), [](Dialect *dialect) {
+          return std::make_unique<InterfaceTy>(dialect);
+        });
   }
 
   /// Register any interfaces required for the given dialect (based on its
@@ -312,7 +347,7 @@ public:
 private:
   /// Add an interface constructed with the given allocation function to the
   /// dialect identified by its namespace.
-  void addDialectInterface(StringRef dialectName,
+  void addDialectInterface(StringRef dialectName, TypeID interfaceTypeID,
                            InterfaceAllocatorFunction allocator);
 
   MapTy registry;

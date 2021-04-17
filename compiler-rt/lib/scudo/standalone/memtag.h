@@ -23,7 +23,15 @@ void setRandomTag(void *Ptr, uptr Size, uptr ExcludeMask, uptr *TaggedBegin,
 
 #if defined(__aarch64__) || defined(SCUDO_FUZZ)
 
+// We assume that Top-Byte Ignore is enabled if the architecture supports memory
+// tagging. Not all operating systems enable TBI, so we only claim architectural
+// support for memory tagging if the operating system enables TBI.
+#if SCUDO_LINUX && !defined(SCUDO_DISABLE_TBI)
 inline constexpr bool archSupportsMemoryTagging() { return true; }
+#else
+inline constexpr bool archSupportsMemoryTagging() { return false; }
+#endif
+
 inline constexpr uptr archMemoryTagGranuleSize() { return 16; }
 
 inline uptr untagPointer(uptr Ptr) { return Ptr & ((1ULL << 56) - 1); }
@@ -88,11 +96,19 @@ inline bool systemDetectsMemoryTagFaultsTestOnly() { return false; }
 #endif // SCUDO_LINUX
 
 inline void disableMemoryTagChecksTestOnly() {
-  __asm__ __volatile__(".arch_extension memtag; msr tco, #1");
+  __asm__ __volatile__(
+      R"(
+      .arch_extension memtag
+      msr tco, #1
+      )");
 }
 
 inline void enableMemoryTagChecksTestOnly() {
-  __asm__ __volatile__(".arch_extension memtag; msr tco, #0");
+  __asm__ __volatile__(
+      R"(
+      .arch_extension memtag
+      msr tco, #0
+      )");
 }
 
 class ScopedDisableMemoryTagChecks {
@@ -100,25 +116,39 @@ class ScopedDisableMemoryTagChecks {
 
 public:
   ScopedDisableMemoryTagChecks() {
-    __asm__ __volatile__(".arch_extension memtag; mrs %0, tco; msr tco, #1"
-                         : "=r"(PrevTCO));
+    __asm__ __volatile__(
+        R"(
+        .arch_extension memtag
+        mrs %0, tco
+        msr tco, #1
+        )"
+        : "=r"(PrevTCO));
   }
 
   ~ScopedDisableMemoryTagChecks() {
-    __asm__ __volatile__(".arch_extension memtag; msr tco, %0"
-                         :
-                         : "r"(PrevTCO));
+    __asm__ __volatile__(
+        R"(
+        .arch_extension memtag
+        msr tco, %0
+        )"
+        :
+        : "r"(PrevTCO));
   }
 };
 
 inline uptr selectRandomTag(uptr Ptr, uptr ExcludeMask) {
   uptr TaggedPtr;
   __asm__ __volatile__(
-      ".arch_extension memtag; irg %[TaggedPtr], %[Ptr], %[ExcludeMask]"
+      R"(
+      .arch_extension memtag
+      irg %[TaggedPtr], %[Ptr], %[ExcludeMask]
+      )"
       : [TaggedPtr] "=r"(TaggedPtr)
       : [Ptr] "r"(Ptr), [ExcludeMask] "r"(ExcludeMask));
   return TaggedPtr;
 }
+
+inline uptr addFixedTag(uptr Ptr, uptr Tag) { return Ptr | (Tag << 56); }
 
 inline uptr storeTags(uptr Begin, uptr End) {
   DCHECK(Begin % 16 == 0);
@@ -146,10 +176,14 @@ inline void *prepareTaggedChunk(void *Ptr, uptr Size, uptr ExcludeMask,
   // chunk holding a low alignment allocation is reused for a higher alignment
   // allocation, the chunk may already have a non-zero tag from the previous
   // allocation.
-  __asm__ __volatile__(".arch_extension memtag; stg %0, [%0, #-16]"
-                       :
-                       : "r"(Ptr)
-                       : "memory");
+  __asm__ __volatile__(
+      R"(
+      .arch_extension memtag
+      stg %0, [%0, #-16]
+      )"
+      :
+      : "r"(Ptr)
+      : "memory");
 
   uptr TaggedBegin, TaggedEnd;
   setRandomTag(Ptr, Size, ExcludeMask, &TaggedBegin, &TaggedEnd);
@@ -163,10 +197,14 @@ inline void *prepareTaggedChunk(void *Ptr, uptr Size, uptr ExcludeMask,
   // purpose of catching linear overflows in this case.
   uptr UntaggedEnd = untagPointer(TaggedEnd);
   if (UntaggedEnd != BlockEnd)
-    __asm__ __volatile__(".arch_extension memtag; stg %0, [%0]"
-                         :
-                         : "r"(UntaggedEnd)
-                         : "memory");
+    __asm__ __volatile__(
+        R"(
+        .arch_extension memtag
+        stg %0, [%0]
+        )"
+        :
+        : "r"(UntaggedEnd)
+        : "memory");
   return reinterpret_cast<void *>(TaggedBegin);
 }
 
@@ -177,10 +215,14 @@ inline void resizeTaggedChunk(uptr OldPtr, uptr NewPtr, uptr BlockEnd) {
     // of the allocation to 0. See explanation in prepareTaggedChunk above.
     uptr RoundNewPtr = untagPointer(roundUpTo(NewPtr, 16));
     if (RoundNewPtr != BlockEnd)
-      __asm__ __volatile__(".arch_extension memtag; stg %0, [%0]"
-                           :
-                           : "r"(RoundNewPtr)
-                           : "memory");
+      __asm__ __volatile__(
+          R"(
+          .arch_extension memtag
+          stg %0, [%0]
+          )"
+          :
+          : "r"(RoundNewPtr)
+          : "memory");
     return;
   }
 
@@ -210,10 +252,14 @@ inline void resizeTaggedChunk(uptr OldPtr, uptr NewPtr, uptr BlockEnd) {
 
 inline uptr loadTag(uptr Ptr) {
   uptr TaggedPtr = Ptr;
-  __asm__ __volatile__(".arch_extension memtag; ldg %0, [%0]"
-                       : "+r"(TaggedPtr)
-                       :
-                       : "memory");
+  __asm__ __volatile__(
+      R"(
+      .arch_extension memtag
+      ldg %0, [%0]
+      )"
+      : "+r"(TaggedPtr)
+      :
+      : "memory");
   return TaggedPtr;
 }
 
@@ -242,6 +288,12 @@ struct ScopedDisableMemoryTagChecks {
 inline uptr selectRandomTag(uptr Ptr, uptr ExcludeMask) {
   (void)Ptr;
   (void)ExcludeMask;
+  UNREACHABLE("memory tagging not supported");
+}
+
+inline uptr addFixedTag(uptr Ptr, uptr Tag) {
+  (void)Ptr;
+  (void)Tag;
   UNREACHABLE("memory tagging not supported");
 }
 
@@ -278,6 +330,19 @@ inline void setRandomTag(void *Ptr, uptr Size, uptr ExcludeMask,
                          uptr *TaggedBegin, uptr *TaggedEnd) {
   *TaggedBegin = selectRandomTag(reinterpret_cast<uptr>(Ptr), ExcludeMask);
   *TaggedEnd = storeTags(*TaggedBegin, *TaggedBegin + Size);
+}
+
+inline void *untagPointer(void *Ptr) {
+  return reinterpret_cast<void *>(untagPointer(reinterpret_cast<uptr>(Ptr)));
+}
+
+inline void *loadTag(void *Ptr) {
+  return reinterpret_cast<void *>(loadTag(reinterpret_cast<uptr>(Ptr)));
+}
+
+inline void *addFixedTag(void *Ptr, uptr Tag) {
+  return reinterpret_cast<void *>(
+      addFixedTag(reinterpret_cast<uptr>(Ptr), Tag));
 }
 
 template <typename Config>

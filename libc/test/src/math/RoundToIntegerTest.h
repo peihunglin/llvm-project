@@ -9,7 +9,6 @@
 #ifndef LLVM_LIBC_TEST_SRC_MATH_ROUNDTOINTEGERTEST_H
 #define LLVM_LIBC_TEST_SRC_MATH_ROUNDTOINTEGERTEST_H
 
-#include "src/errno/llvmlibc_errno.h"
 #include "utils/FPUtil/FPBits.h"
 #include "utils/MPFRWrapper/MPFRUtils.h"
 #include "utils/UnitTest/Test.h"
@@ -47,7 +46,7 @@ private:
   void testOneInput(RoundToIntegerFunc func, F input, I expected,
                     bool expectError) {
 #if math_errhandling & MATH_ERRNO
-    llvmlibc_errno = 0;
+    errno = 0;
 #endif
 #if math_errhandling & MATH_ERREXCEPT
     __llvm_libc::fputil::clearExcept(FE_ALL_EXCEPT);
@@ -60,14 +59,14 @@ private:
       ASSERT_EQ(__llvm_libc::fputil::testExcept(FE_ALL_EXCEPT), FE_INVALID);
 #endif
 #if math_errhandling & MATH_ERRNO
-      ASSERT_EQ(llvmlibc_errno, EDOM);
+      ASSERT_EQ(errno, EDOM);
 #endif
     } else {
 #if math_errhandling & MATH_ERREXCEPT
       ASSERT_EQ(__llvm_libc::fputil::testExcept(FE_ALL_EXCEPT), 0);
 #endif
 #if math_errhandling & MATH_ERRNO
-      ASSERT_EQ(llvmlibc_errno, 0);
+      ASSERT_EQ(errno, 0);
 #endif
     }
   }
@@ -136,9 +135,9 @@ public:
     // We start with 1.0 so that the implicit bit for x86 long doubles
     // is set.
     FPBits bits(F(1.0));
-    bits.exponent = exponentLimit + FPBits::exponentBias;
-    bits.sign = 1;
-    bits.mantissa = 0;
+    bits.encoding.exponent = exponentLimit + FPBits::exponentBias;
+    bits.encoding.sign = 1;
+    bits.encoding.mantissa = 0;
 
     F x = bits;
     long mpfrResult;
@@ -200,10 +199,10 @@ public:
     // We start with 1.0 so that the implicit bit for x86 long doubles
     // is set.
     FPBits bits(F(1.0));
-    bits.exponent = exponentLimit + FPBits::exponentBias;
-    bits.sign = 1;
-    bits.mantissa = UIntType(0x1)
-                    << (__llvm_libc::fputil::MantissaWidth<F>::value - 1);
+    bits.encoding.exponent = exponentLimit + FPBits::exponentBias;
+    bits.encoding.sign = 1;
+    bits.encoding.mantissa =
+        UIntType(0x1) << (__llvm_libc::fputil::MantissaWidth<F>::value - 1);
 
     F x = bits;
     if (TestModes) {

@@ -26,31 +26,26 @@ define arm_aapcs_vfpcc void @float_float_mul(float* nocapture readonly %a, float
 ; CHECK-NEXT:    cmp r4, r2
 ; CHECK-NEXT:    cset r4, hi
 ; CHECK-NEXT:    mov.w r12, #0
-; CHECK-NEXT:    ands r5, r4
-; CHECK-NEXT:    lsls r5, r5, #31
-; CHECK-NEXT:    itt eq
-; CHECK-NEXT:    andeq r7, r6
-; CHECK-NEXT:    lslseq.w r7, r7, #31
+; CHECK-NEXT:    tst r4, r5
+; CHECK-NEXT:    it eq
+; CHECK-NEXT:    andseq.w r7, r7, r6
 ; CHECK-NEXT:    beq .LBB0_11
 ; CHECK-NEXT:  .LBB0_4: @ %for.body.preheader22
 ; CHECK-NEXT:    mvn.w r7, r12
 ; CHECK-NEXT:    adds r4, r7, r3
-; CHECK-NEXT:    and lr, r3, #3
-; CHECK-NEXT:    wls lr, lr, .LBB0_7
+; CHECK-NEXT:    and r7, r3, #3
+; CHECK-NEXT:    wls lr, r7, .LBB0_7
 ; CHECK-NEXT:  @ %bb.5: @ %for.body.prol.preheader
 ; CHECK-NEXT:    add.w r5, r0, r12, lsl #2
 ; CHECK-NEXT:    add.w r6, r1, r12, lsl #2
 ; CHECK-NEXT:    add.w r7, r2, r12, lsl #2
 ; CHECK-NEXT:  .LBB0_6: @ %for.body.prol
 ; CHECK-NEXT:    @ =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    vldr s0, [r6]
-; CHECK-NEXT:    adds r6, #4
-; CHECK-NEXT:    vldr s2, [r5]
-; CHECK-NEXT:    adds r5, #4
+; CHECK-NEXT:    vldmia r6!, {s0}
 ; CHECK-NEXT:    add.w r12, r12, #1
+; CHECK-NEXT:    vldmia r5!, {s2}
 ; CHECK-NEXT:    vmul.f32 s0, s2, s0
-; CHECK-NEXT:    vstr s0, [r7]
-; CHECK-NEXT:    adds r7, #4
+; CHECK-NEXT:    vstmia r7!, {s0}
 ; CHECK-NEXT:    le lr, .LBB0_6
 ; CHECK-NEXT:  .LBB0_7: @ %for.body.prol.loopexit
 ; CHECK-NEXT:    cmp r4, #3
@@ -244,31 +239,26 @@ define arm_aapcs_vfpcc void @float_float_add(float* nocapture readonly %a, float
 ; CHECK-NEXT:    cmp r4, r2
 ; CHECK-NEXT:    cset r4, hi
 ; CHECK-NEXT:    mov.w r12, #0
-; CHECK-NEXT:    ands r5, r4
-; CHECK-NEXT:    lsls r5, r5, #31
-; CHECK-NEXT:    itt eq
-; CHECK-NEXT:    andeq r7, r6
-; CHECK-NEXT:    lslseq.w r7, r7, #31
+; CHECK-NEXT:    tst r4, r5
+; CHECK-NEXT:    it eq
+; CHECK-NEXT:    andseq.w r7, r7, r6
 ; CHECK-NEXT:    beq .LBB1_11
 ; CHECK-NEXT:  .LBB1_4: @ %for.body.preheader22
 ; CHECK-NEXT:    mvn.w r7, r12
 ; CHECK-NEXT:    adds r4, r7, r3
-; CHECK-NEXT:    and lr, r3, #3
-; CHECK-NEXT:    wls lr, lr, .LBB1_7
+; CHECK-NEXT:    and r7, r3, #3
+; CHECK-NEXT:    wls lr, r7, .LBB1_7
 ; CHECK-NEXT:  @ %bb.5: @ %for.body.prol.preheader
 ; CHECK-NEXT:    add.w r5, r0, r12, lsl #2
 ; CHECK-NEXT:    add.w r6, r1, r12, lsl #2
 ; CHECK-NEXT:    add.w r7, r2, r12, lsl #2
 ; CHECK-NEXT:  .LBB1_6: @ %for.body.prol
 ; CHECK-NEXT:    @ =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    vldr s0, [r6]
-; CHECK-NEXT:    adds r6, #4
-; CHECK-NEXT:    vldr s2, [r5]
-; CHECK-NEXT:    adds r5, #4
+; CHECK-NEXT:    vldmia r6!, {s0}
 ; CHECK-NEXT:    add.w r12, r12, #1
+; CHECK-NEXT:    vldmia r5!, {s2}
 ; CHECK-NEXT:    vadd.f32 s0, s2, s0
-; CHECK-NEXT:    vstr s0, [r7]
-; CHECK-NEXT:    adds r7, #4
+; CHECK-NEXT:    vstmia r7!, {s0}
 ; CHECK-NEXT:    le lr, .LBB1_6
 ; CHECK-NEXT:  .LBB1_7: @ %for.body.prol.loopexit
 ; CHECK-NEXT:    cmp r4, #3
@@ -462,31 +452,26 @@ define arm_aapcs_vfpcc void @float_float_sub(float* nocapture readonly %a, float
 ; CHECK-NEXT:    cmp r4, r2
 ; CHECK-NEXT:    cset r4, hi
 ; CHECK-NEXT:    mov.w r12, #0
-; CHECK-NEXT:    ands r5, r4
-; CHECK-NEXT:    lsls r5, r5, #31
-; CHECK-NEXT:    itt eq
-; CHECK-NEXT:    andeq r7, r6
-; CHECK-NEXT:    lslseq.w r7, r7, #31
+; CHECK-NEXT:    tst r4, r5
+; CHECK-NEXT:    it eq
+; CHECK-NEXT:    andseq.w r7, r7, r6
 ; CHECK-NEXT:    beq .LBB2_11
 ; CHECK-NEXT:  .LBB2_4: @ %for.body.preheader22
 ; CHECK-NEXT:    mvn.w r7, r12
 ; CHECK-NEXT:    adds r4, r7, r3
-; CHECK-NEXT:    and lr, r3, #3
-; CHECK-NEXT:    wls lr, lr, .LBB2_7
+; CHECK-NEXT:    and r7, r3, #3
+; CHECK-NEXT:    wls lr, r7, .LBB2_7
 ; CHECK-NEXT:  @ %bb.5: @ %for.body.prol.preheader
 ; CHECK-NEXT:    add.w r5, r0, r12, lsl #2
 ; CHECK-NEXT:    add.w r6, r1, r12, lsl #2
 ; CHECK-NEXT:    add.w r7, r2, r12, lsl #2
 ; CHECK-NEXT:  .LBB2_6: @ %for.body.prol
 ; CHECK-NEXT:    @ =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    vldr s0, [r6]
-; CHECK-NEXT:    adds r6, #4
-; CHECK-NEXT:    vldr s2, [r5]
-; CHECK-NEXT:    adds r5, #4
+; CHECK-NEXT:    vldmia r6!, {s0}
 ; CHECK-NEXT:    add.w r12, r12, #1
+; CHECK-NEXT:    vldmia r5!, {s2}
 ; CHECK-NEXT:    vsub.f32 s0, s2, s0
-; CHECK-NEXT:    vstr s0, [r7]
-; CHECK-NEXT:    adds r7, #4
+; CHECK-NEXT:    vstmia r7!, {s0}
 ; CHECK-NEXT:    le lr, .LBB2_6
 ; CHECK-NEXT:  .LBB2_7: @ %for.body.prol.loopexit
 ; CHECK-NEXT:    cmp r4, #3
@@ -696,8 +681,8 @@ define arm_aapcs_vfpcc void @float_int_mul(float* nocapture readonly %a, i32* no
 ; CHECK-NEXT:  .LBB3_7: @ %for.body.preheader16
 ; CHECK-NEXT:    mvn.w r7, r12
 ; CHECK-NEXT:    add.w r8, r7, r3
-; CHECK-NEXT:    and lr, r3, #3
-; CHECK-NEXT:    wls lr, lr, .LBB3_10
+; CHECK-NEXT:    and r7, r3, #3
+; CHECK-NEXT:    wls lr, r7, .LBB3_10
 ; CHECK-NEXT:  @ %bb.8: @ %for.body.prol.preheader
 ; CHECK-NEXT:    add.w r5, r0, r12, lsl #2
 ; CHECK-NEXT:    add.w r6, r1, r12, lsl #2
@@ -706,13 +691,11 @@ define arm_aapcs_vfpcc void @float_int_mul(float* nocapture readonly %a, i32* no
 ; CHECK-NEXT:    @ =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    ldr r4, [r6], #4
 ; CHECK-NEXT:    add.w r12, r12, #1
-; CHECK-NEXT:    vldr s2, [r5]
-; CHECK-NEXT:    adds r5, #4
+; CHECK-NEXT:    vldmia r5!, {s2}
 ; CHECK-NEXT:    vmov s0, r4
 ; CHECK-NEXT:    vcvt.f32.s32 s0, s0
 ; CHECK-NEXT:    vmul.f32 s0, s2, s0
-; CHECK-NEXT:    vstr s0, [r7]
-; CHECK-NEXT:    adds r7, #4
+; CHECK-NEXT:    vstmia r7!, {s0}
 ; CHECK-NEXT:    le lr, .LBB3_9
 ; CHECK-NEXT:  .LBB3_10: @ %for.body.prol.loopexit
 ; CHECK-NEXT:    cmp.w r8, #3
@@ -1025,8 +1008,7 @@ define arm_aapcs_vfpcc void @half_half_mul(half* nocapture readonly %a, half* no
 ; CHECK-NEXT:    adds r1, #2
 ; CHECK-NEXT:    vmul.f16 s0, s2, s0
 ; CHECK-NEXT:    vcvtb.f32.f16 s0, s0
-; CHECK-NEXT:    vstr s0, [r2]
-; CHECK-NEXT:    adds r2, #4
+; CHECK-NEXT:    vstmia r2!, {s0}
 ; CHECK-NEXT:    le lr, .LBB5_7
 ; CHECK-NEXT:  .LBB5_8: @ %for.cond.cleanup
 ; CHECK-NEXT:    pop.w {r4, r5, r6, r7, r8, r9, r10, pc}
@@ -1140,8 +1122,7 @@ define arm_aapcs_vfpcc void @half_half_add(half* nocapture readonly %a, half* no
 ; CHECK-NEXT:    adds r1, #2
 ; CHECK-NEXT:    vadd.f16 s0, s2, s0
 ; CHECK-NEXT:    vcvtb.f32.f16 s0, s0
-; CHECK-NEXT:    vstr s0, [r2]
-; CHECK-NEXT:    adds r2, #4
+; CHECK-NEXT:    vstmia r2!, {s0}
 ; CHECK-NEXT:    le lr, .LBB6_7
 ; CHECK-NEXT:  .LBB6_8: @ %for.cond.cleanup
 ; CHECK-NEXT:    pop.w {r4, r5, r6, r7, r8, r9, r10, pc}
@@ -1255,8 +1236,7 @@ define arm_aapcs_vfpcc void @half_half_sub(half* nocapture readonly %a, half* no
 ; CHECK-NEXT:    adds r1, #2
 ; CHECK-NEXT:    vsub.f16 s0, s2, s0
 ; CHECK-NEXT:    vcvtb.f32.f16 s0, s0
-; CHECK-NEXT:    vstr s0, [r2]
-; CHECK-NEXT:    adds r2, #4
+; CHECK-NEXT:    vstmia r2!, {s0}
 ; CHECK-NEXT:    le lr, .LBB7_7
 ; CHECK-NEXT:  .LBB7_8: @ %for.cond.cleanup
 ; CHECK-NEXT:    pop.w {r4, r5, r6, r7, r8, r9, r10, pc}
@@ -1376,8 +1356,7 @@ define arm_aapcs_vfpcc void @half_short_mul(half* nocapture readonly %a, i16* no
 ; CHECK-NEXT:    vcvt.f16.s32 s2, s2
 ; CHECK-NEXT:    vmul.f16 s0, s0, s2
 ; CHECK-NEXT:    vcvtb.f32.f16 s0, s0
-; CHECK-NEXT:    vstr s0, [r2]
-; CHECK-NEXT:    adds r2, #4
+; CHECK-NEXT:    vstmia r2!, {s0}
 ; CHECK-NEXT:    le lr, .LBB8_7
 ; CHECK-NEXT:  .LBB8_8: @ %for.cond.cleanup
 ; CHECK-NEXT:    pop.w {r4, r5, r6, r7, r8, r9, pc}
@@ -1445,7 +1424,7 @@ define arm_aapcs_vfpcc float @half_half_mac(half* nocapture readonly %a, half* n
 ; CHECK-NEXT:    cbz r2, .LBB9_3
 ; CHECK-NEXT:  @ %bb.1: @ %for.body.preheader
 ; CHECK-NEXT:    subs r3, r2, #1
-; CHECK-NEXT:    and lr, r2, #3
+; CHECK-NEXT:    and r12, r2, #3
 ; CHECK-NEXT:    vldr s0, .LCPI9_0
 ; CHECK-NEXT:    cmp r3, #3
 ; CHECK-NEXT:    bhs .LBB9_4
@@ -1456,7 +1435,7 @@ define arm_aapcs_vfpcc float @half_half_mac(half* nocapture readonly %a, half* n
 ; CHECK-NEXT:    vldr s0, .LCPI9_0
 ; CHECK-NEXT:    b .LBB9_9
 ; CHECK-NEXT:  .LBB9_4: @ %for.body.preheader.new
-; CHECK-NEXT:    sub.w r12, r2, lr
+; CHECK-NEXT:    sub.w lr, r2, r12
 ; CHECK-NEXT:    movs r3, #0
 ; CHECK-NEXT:    movs r2, #0
 ; CHECK-NEXT:  .LBB9_5: @ %for.body
@@ -1480,7 +1459,7 @@ define arm_aapcs_vfpcc float @half_half_mac(half* nocapture readonly %a, half* n
 ; CHECK-NEXT:    vcvtb.f32.f16 s6, s6
 ; CHECK-NEXT:    adds r3, #8
 ; CHECK-NEXT:    vmul.f16 s8, s10, s8
-; CHECK-NEXT:    cmp r12, r2
+; CHECK-NEXT:    cmp lr, r2
 ; CHECK-NEXT:    vcvtb.f32.f16 s8, s8
 ; CHECK-NEXT:    vadd.f32 s0, s0, s8
 ; CHECK-NEXT:    vadd.f32 s0, s0, s6
@@ -1488,7 +1467,7 @@ define arm_aapcs_vfpcc float @half_half_mac(half* nocapture readonly %a, half* n
 ; CHECK-NEXT:    vadd.f32 s0, s0, s2
 ; CHECK-NEXT:    bne .LBB9_5
 ; CHECK-NEXT:  .LBB9_6: @ %for.cond.cleanup.loopexit.unr-lcssa
-; CHECK-NEXT:    wls lr, lr, .LBB9_9
+; CHECK-NEXT:    wls lr, r12, .LBB9_9
 ; CHECK-NEXT:  @ %bb.7: @ %for.body.epil.preheader
 ; CHECK-NEXT:    add.w r0, r0, r2, lsl #1
 ; CHECK-NEXT:    add.w r1, r1, r2, lsl #1
@@ -1597,7 +1576,7 @@ define arm_aapcs_vfpcc float @half_half_acc(half* nocapture readonly %a, half* n
 ; CHECK-NEXT:    cbz r2, .LBB10_3
 ; CHECK-NEXT:  @ %bb.1: @ %for.body.preheader
 ; CHECK-NEXT:    subs r3, r2, #1
-; CHECK-NEXT:    and lr, r2, #3
+; CHECK-NEXT:    and r12, r2, #3
 ; CHECK-NEXT:    vldr s0, .LCPI10_0
 ; CHECK-NEXT:    cmp r3, #3
 ; CHECK-NEXT:    bhs .LBB10_4
@@ -1608,7 +1587,7 @@ define arm_aapcs_vfpcc float @half_half_acc(half* nocapture readonly %a, half* n
 ; CHECK-NEXT:    vldr s0, .LCPI10_0
 ; CHECK-NEXT:    b .LBB10_9
 ; CHECK-NEXT:  .LBB10_4: @ %for.body.preheader.new
-; CHECK-NEXT:    sub.w r12, r2, lr
+; CHECK-NEXT:    sub.w lr, r2, r12
 ; CHECK-NEXT:    movs r3, #0
 ; CHECK-NEXT:    movs r2, #0
 ; CHECK-NEXT:  .LBB10_5: @ %for.body
@@ -1632,7 +1611,7 @@ define arm_aapcs_vfpcc float @half_half_acc(half* nocapture readonly %a, half* n
 ; CHECK-NEXT:    vcvtb.f32.f16 s6, s6
 ; CHECK-NEXT:    adds r3, #8
 ; CHECK-NEXT:    vadd.f16 s8, s10, s8
-; CHECK-NEXT:    cmp r12, r2
+; CHECK-NEXT:    cmp lr, r2
 ; CHECK-NEXT:    vcvtb.f32.f16 s8, s8
 ; CHECK-NEXT:    vadd.f32 s0, s0, s8
 ; CHECK-NEXT:    vadd.f32 s0, s0, s6
@@ -1640,7 +1619,7 @@ define arm_aapcs_vfpcc float @half_half_acc(half* nocapture readonly %a, half* n
 ; CHECK-NEXT:    vadd.f32 s0, s0, s2
 ; CHECK-NEXT:    bne .LBB10_5
 ; CHECK-NEXT:  .LBB10_6: @ %for.cond.cleanup.loopexit.unr-lcssa
-; CHECK-NEXT:    wls lr, lr, .LBB10_9
+; CHECK-NEXT:    wls lr, r12, .LBB10_9
 ; CHECK-NEXT:  @ %bb.7: @ %for.body.epil.preheader
 ; CHECK-NEXT:    add.w r0, r0, r2, lsl #1
 ; CHECK-NEXT:    add.w r1, r1, r2, lsl #1
@@ -1749,7 +1728,7 @@ define arm_aapcs_vfpcc float @half_short_mac(half* nocapture readonly %a, i16* n
 ; CHECK-NEXT:    cbz r2, .LBB11_3
 ; CHECK-NEXT:  @ %bb.1: @ %for.body.preheader
 ; CHECK-NEXT:    subs r3, r2, #1
-; CHECK-NEXT:    and lr, r2, #3
+; CHECK-NEXT:    and r12, r2, #3
 ; CHECK-NEXT:    vldr s0, .LCPI11_0
 ; CHECK-NEXT:    cmp r3, #3
 ; CHECK-NEXT:    bhs .LBB11_4
@@ -1760,7 +1739,7 @@ define arm_aapcs_vfpcc float @half_short_mac(half* nocapture readonly %a, i16* n
 ; CHECK-NEXT:    vldr s0, .LCPI11_0
 ; CHECK-NEXT:    b .LBB11_9
 ; CHECK-NEXT:  .LBB11_4: @ %for.body.preheader.new
-; CHECK-NEXT:    sub.w r12, r2, lr
+; CHECK-NEXT:    sub.w lr, r2, r12
 ; CHECK-NEXT:    adds r3, r1, #4
 ; CHECK-NEXT:    adds r4, r0, #4
 ; CHECK-NEXT:    movs r2, #0
@@ -1769,7 +1748,7 @@ define arm_aapcs_vfpcc float @half_short_mac(half* nocapture readonly %a, i16* n
 ; CHECK-NEXT:    ldrsh.w r5, [r3, #2]
 ; CHECK-NEXT:    vldr.16 s2, [r4, #2]
 ; CHECK-NEXT:    adds r2, #4
-; CHECK-NEXT:    cmp r12, r2
+; CHECK-NEXT:    cmp lr, r2
 ; CHECK-NEXT:    vmov s4, r5
 ; CHECK-NEXT:    ldrsh r5, [r3], #8
 ; CHECK-NEXT:    vcvt.f16.s32 s4, s4
@@ -1799,7 +1778,7 @@ define arm_aapcs_vfpcc float @half_short_mac(half* nocapture readonly %a, i16* n
 ; CHECK-NEXT:    vadd.f32 s0, s0, s2
 ; CHECK-NEXT:    bne .LBB11_5
 ; CHECK-NEXT:  .LBB11_6: @ %for.cond.cleanup.loopexit.unr-lcssa
-; CHECK-NEXT:    wls lr, lr, .LBB11_9
+; CHECK-NEXT:    wls lr, r12, .LBB11_9
 ; CHECK-NEXT:  @ %bb.7: @ %for.body.epil.preheader
 ; CHECK-NEXT:    add.w r0, r0, r2, lsl #1
 ; CHECK-NEXT:    add.w r1, r1, r2, lsl #1

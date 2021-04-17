@@ -10,50 +10,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Target/LLVMIR.h"
-
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
-#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
-#include "mlir/Target/LLVMIR/Dialect/OpenMP/OpenMPToLLVMIRTranslation.h"
-#include "mlir/Target/LLVMIR/ModuleTranslation.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/Target/LLVMIR/Dialect/All.h"
+#include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Translation.h"
-
-#include "llvm/ADT/StringRef.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/Support/ToolOutputFile.h"
 
 using namespace mlir;
-
-std::unique_ptr<llvm::Module>
-mlir::translateModuleToLLVMIR(ModuleOp m, llvm::LLVMContext &llvmContext,
-                              StringRef name) {
-  auto llvmModule =
-      LLVM::ModuleTranslation::translateModule<>(m, llvmContext, name);
-  if (!llvmModule)
-    emitError(m.getLoc(), "Fail to convert MLIR to LLVM IR");
-  else if (verifyModule(*llvmModule))
-    emitError(m.getLoc(), "LLVM IR fails to verify");
-  return llvmModule;
-}
-
-void mlir::registerLLVMDialectTranslation(DialectRegistry &registry) {
-  registry.insert<LLVM::LLVMDialect>();
-  registry.addDialectInterface<LLVM::LLVMDialect,
-                               LLVMDialectLLVMIRTranslationInterface>();
-}
-
-void mlir::registerLLVMDialectTranslation(MLIRContext &context) {
-  auto *dialect = context.getLoadedDialect<LLVM::LLVMDialect>();
-  if (!dialect || dialect->getRegisteredInterface<
-                      LLVMDialectLLVMIRTranslationInterface>() == nullptr) {
-    DialectRegistry registry;
-    registry.insert<LLVM::LLVMDialect>();
-    registry.addDialectInterface<LLVM::LLVMDialect,
-                                 LLVMDialectLLVMIRTranslationInterface>();
-    context.appendDialectRegistry(registry);
-  }
-}
 
 namespace mlir {
 void registerToLLVMIRTranslation() {
@@ -61,8 +25,7 @@ void registerToLLVMIRTranslation() {
       "mlir-to-llvmir",
       [](ModuleOp module, raw_ostream &output) {
         llvm::LLVMContext llvmContext;
-        auto llvmModule = LLVM::ModuleTranslation::translateModule<>(
-            module, llvmContext, "LLVMDialectModule");
+        auto llvmModule = translateModuleToLLVMIR(module, llvmContext);
         if (!llvmModule)
           return failure();
 
@@ -70,10 +33,7 @@ void registerToLLVMIRTranslation() {
         return success();
       },
       [](DialectRegistry &registry) {
-        registry.insert<omp::OpenMPDialect>();
-        registry.addDialectInterface<omp::OpenMPDialect,
-                                     OpenMPDialectLLVMIRTranslationInterface>();
-        registerLLVMDialectTranslation(registry);
+        registerAllToLLVMIRTranslations(registry);
       });
 }
 } // namespace mlir

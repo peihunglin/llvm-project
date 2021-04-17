@@ -78,6 +78,9 @@ public:
   /// Options controlling the preprocessor (aside from \#include handling).
   std::shared_ptr<PreprocessorOptions> PreprocessorOpts;
 
+  /// Options controlling the static analyzer.
+  AnalyzerOptionsRef AnalyzerOpts;
+
   CompilerInvocationBase();
   CompilerInvocationBase(const CompilerInvocationBase &X);
   CompilerInvocationBase &operator=(const CompilerInvocationBase &) = delete;
@@ -110,6 +113,8 @@ public:
   const PreprocessorOptions &getPreprocessorOpts() const {
     return *PreprocessorOpts;
   }
+
+  AnalyzerOptionsRef getAnalyzerOpts() const { return AnalyzerOpts; }
 };
 
 /// Helper class for holding the data necessary to invoke the compiler.
@@ -118,9 +123,6 @@ public:
 /// compiler, including data such as the include paths, the code generation
 /// options, the warning flags, and so on.
 class CompilerInvocation : public CompilerInvocationBase {
-  /// Options controlling the static analyzer.
-  AnalyzerOptionsRef AnalyzerOpts;
-
   MigratorOptions MigratorOpts;
 
   /// Options controlling IRgen and the backend.
@@ -139,8 +141,6 @@ class CompilerInvocation : public CompilerInvocationBase {
   PreprocessorOutputOptions PreprocessorOutputOpts;
 
 public:
-  CompilerInvocation() : AnalyzerOpts(new AnalyzerOptions()) {}
-
   /// @name Utility Methods
   /// @{
 
@@ -203,8 +203,6 @@ public:
   /// @name Option Subgroups
   /// @{
 
-  AnalyzerOptionsRef getAnalyzerOpts() const { return AnalyzerOpts; }
-
   MigratorOptions &getMigratorOpts() { return MigratorOpts; }
   const MigratorOptions &getMigratorOpts() const { return MigratorOpts; }
 
@@ -239,12 +237,9 @@ public:
   /// @}
 
 private:
-  /// Parse command line options from DiagnosticOptions.
-  static bool ParseDiagnosticArgsRoundTrip(CompilerInvocation &Res,
-                                           DiagnosticOptions &Opts,
-                                           llvm::opt::ArgList &Args,
-                                           DiagnosticsEngine *Diags = nullptr,
-                                           bool DefaultDiagColor = true);
+  static bool CreateFromArgsImpl(CompilerInvocation &Res,
+                                 ArrayRef<const char *> CommandLineArgs,
+                                 DiagnosticsEngine &Diags, const char *Argv0);
 
   /// Generate command line options from DiagnosticOptions.
   static void GenerateDiagnosticArgs(const DiagnosticOptions &Opts,
@@ -252,14 +247,8 @@ private:
                                      StringAllocator SA, bool DefaultDiagColor);
 
   /// Parse command line options that map to LangOptions.
-  static bool ParseLangArgsImpl(LangOptions &Opts, llvm::opt::ArgList &Args,
-                                InputKind IK, const llvm::Triple &T,
-                                std::vector<std::string> &Includes,
-                                DiagnosticsEngine &Diags);
-
-  static bool ParseLangArgs(CompilerInvocation &Res, LangOptions &Opts,
-                            llvm::opt::ArgList &Args, InputKind IK,
-                            const llvm::Triple &T,
+  static bool ParseLangArgs(LangOptions &Opts, llvm::opt::ArgList &Args,
+                            InputKind IK, const llvm::Triple &T,
                             std::vector<std::string> &Includes,
                             DiagnosticsEngine &Diags);
 
@@ -269,16 +258,9 @@ private:
                                StringAllocator SA, const llvm::Triple &T);
 
   /// Parse command line options that map to CodeGenOptions.
-  static bool ParseCodeGenArgsImpl(CodeGenOptions &Opts,
-                                   llvm::opt::ArgList &Args, InputKind IK,
-                                   DiagnosticsEngine &Diags,
-                                   const llvm::Triple &T,
-                                   const std::string &OutputFile,
-                                   const LangOptions &LangOptsRef);
-
-  static bool ParseCodeGenArgs(CompilerInvocation &Res, CodeGenOptions &Opts,
-                               llvm::opt::ArgList &Args, InputKind IK,
-                               DiagnosticsEngine &Diags, const llvm::Triple &T,
+  static bool ParseCodeGenArgs(CodeGenOptions &Opts, llvm::opt::ArgList &Args,
+                               InputKind IK, DiagnosticsEngine &Diags,
+                               const llvm::Triple &T,
                                const std::string &OutputFile,
                                const LangOptions &LangOptsRef);
 
@@ -288,18 +270,6 @@ private:
                                   StringAllocator SA, const llvm::Triple &T,
                                   const std::string &OutputFile,
                                   const LangOptions *LangOpts);
-
-  /// Parse command line options that map to HeaderSearchOptions.
-  static void ParseHeaderSearchArgs(CompilerInvocation &Res,
-                                    HeaderSearchOptions &Opts,
-                                    llvm::opt::ArgList &Args,
-                                    DiagnosticsEngine &Diags,
-                                    const std::string &WorkingDir);
-
-  /// Generate command line options from HeaderSearchOptions.
-  static void GenerateHeaderSearchArgs(HeaderSearchOptions &Opts,
-                                       SmallVectorImpl<const char *> &Args,
-                                       CompilerInvocation::StringAllocator SA);
 };
 
 IntrusiveRefCntPtr<llvm::vfs::FileSystem>

@@ -708,6 +708,7 @@ public:
   ///
   Init *resolveReferences(Resolver &R) const override;
 
+  bool isComplete() const override;
   bool isConcrete() const override;
   std::string getAsString() const override;
 
@@ -1568,9 +1569,7 @@ public:
   void getDirectSuperClasses(SmallVectorImpl<Record *> &Classes) const;
 
   bool isTemplateArg(Init *Name) const {
-    for (Init *TA : TemplateArgs)
-      if (TA == Name) return true;
-    return false;
+    return llvm::is_contained(TemplateArgs, Name);
   }
 
   const RecordVal *getValue(const Init *Name) const {
@@ -1617,6 +1616,12 @@ public:
   void addAssertion(SMLoc Loc, Init *Condition, Init *Message) {
     Assertions.push_back(std::make_tuple(Loc, Condition, Message));
   }
+
+  void appendAssertions(const Record *Rec) {
+    Assertions.append(Rec->Assertions);
+  }
+
+  void checkAssertions();
 
   bool isSubClassOf(const Record *R) const {
     for (const auto &SCPair : SuperClasses)
@@ -2025,6 +2030,12 @@ public:
   explicit MapResolver(Record *CurRec = nullptr) : Resolver(CurRec) {}
 
   void set(Init *Key, Init *Value) { Map[Key] = {Value, false}; }
+
+  bool isComplete(Init *VarName) const {
+    auto It = Map.find(VarName);
+    assert(It != Map.end() && "key must be present in map");
+    return It->second.V->isComplete();
+  }
 
   Init *resolve(Init *VarName) override;
 };
